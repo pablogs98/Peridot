@@ -43,7 +43,5 @@ fn main() {
         .call(&mut store, ())?;
 
     Ok(())
-
-
 }
 
