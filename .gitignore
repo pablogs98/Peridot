@@ -3,3 +3,4 @@
 /.idea/Peridot.iml
 /.idea/vcs.xml
 /.idea/.gitignore
+*/target/

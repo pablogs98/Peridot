@@ -1,7 +1,10 @@
 [package]
-name = "peridot"
+name = "peridot-cli"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-
+wasmtime = "29.0.1"
+wasi-common = "29.0.1"
+wasmtime-wasi = "29.0.1"
+peridot = { path = "crates/peridot" }
