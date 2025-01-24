@@ -10,8 +10,8 @@ fn run_module(module_name: &str, args: &[String]) -> Result<(), Box<dyn std::err
     wasi_common::sync::add_to_linker(&mut linker, |s| s)?;
 
     let wasi = WasiCtxBuilder::new()
-        .inherit_stdio() // Permite heredar stdout y stderr
-        .args(args)?     // Pasar los argumentos al contexto WASI
+        .inherit_stdio() // Inherit stdin, stdout and stderr
+        .args(args)?     // Pass command line arguments to the module
         .build();
 
     let mut store = Store::new(&engine, wasi);
