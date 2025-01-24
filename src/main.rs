@@ -1,5 +1,4 @@
 use std::{env, process, thread};
-use peridot::PeridotConfig;
 use wasmtime::*;
 use wasi_common::sync::WasiCtxBuilder;
 
@@ -28,11 +27,11 @@ fn run_module(module_name: &str, args: &[String]) -> Result<(), Box<dyn std::err
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
-        eprintln!("Usage: {} <path/to/config.yaml>", args[0]);
+        eprintln!("Usage: {} <path/to/config.yaml>", &args[0]);
         process::exit(1);
     }
 
-    let config = match PeridotConfig::new(&args[1]) {
+    let config = match peridot::new_config(&args[1]) {
         Ok(config) => config,
         Err(e) => {
             eprintln!("Error reading \"{}\": {}", &args[1], e);
@@ -40,20 +39,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    if config.configs.is_empty() {
+    if config.is_empty() {
         eprintln!("No configurations found in \"{}\".", &args[1]);
         process::exit(1);
     }
 
     let mut handles = vec![];
 
-    for (module_name, module_config) in config.configs.iter() {
-        let module_name = module_name.clone();
-        let args: Vec<String> = module_config.args.split_whitespace().map(|s| s.to_string()).collect();
-
-        let handle = thread::spawn(move || {
-            if let Err(e) = run_module(&module_name, &args) {
-                eprintln!("Error running module \"{}\": {}", module_name, e);
+    for (module_name, module_config) in config.into_iter() {
+         let handle = thread::spawn(move || {
+            if let Err(e) = run_module(&module_name, &module_config.args) {
+                eprintln!("Error running module \"{}\": {}", &module_name, e);
             }
         });
         handles.push(handle);
