@@ -3,5 +3,6 @@
 /.idea/Peridot.iml
 /.idea/vcs.xml
 /.idea/.gitignore
-*/target/
+target
 /crates/peridot/target/
+cmake-build*
