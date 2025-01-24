@@ -1,8 +1,30 @@
-use std::{env, process};
+use std::{env, process, thread};
 use peridot::PeridotConfig;
 use wasmtime::*;
 use wasi_common::sync::WasiCtxBuilder;
 
+fn run_module(module_name: &str, args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+
+    wasi_common::sync::add_to_linker(&mut linker, |s| s)?;
+
+    let wasi = WasiCtxBuilder::new()
+        .inherit_stdio() // Permite heredar stdout y stderr
+        .args(args)?     // Pasar los argumentos al contexto WASI
+        .build();
+
+    let mut store = Store::new(&engine, wasi);
+
+    let module = Module::from_file(&engine, module_name)?;
+    linker.module(&mut store, "", &module)?;
+    linker
+        .get_default(&mut store, "")?
+        .typed::<(), ()>(&store)?
+        .call(&mut store, ())?;
+
+    Ok(())
+}
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
@@ -23,23 +45,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         process::exit(1);
     }
 
-    let engine = Engine::default();
-    let mut linker = Linker::new(&engine);
-    wasi_common::sync::add_to_linker(&mut linker, |s| s)?;
+    let mut handles = vec![];
 
-    let wasi = WasiCtxBuilder::new()
-        .inherit_stdio()
-        .inherit_args()?
-        .build();
-    let mut store = Store::new(&engine, wasi);
+    for (module_name, module_config) in config.configs.iter() {
+        let module_name = module_name.clone();
+        let args: Vec<String> = module_config.args.split_whitespace().map(|s| s.to_string()).collect();
 
-    let module_name = config.configs.keys().next().unwrap().to_string();
-    let module = Module::from_file(&engine, &module_name)?;
-    linker.module(&mut store, "", &module)?;
-    linker
-        .get_default(&mut store, config.configs.get(&module_name).unwrap().args.as_str())?
-        .typed::<(), ()>(&store)?
-        .call(&mut store, ())?;
+        let handle = thread::spawn(move || {
+            if let Err(e) = run_module(&module_name, &args) {
+                eprintln!("Error running module \"{}\": {}", module_name, e);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        if let Err(e) = handle.join() {
+            eprintln!("Thread panicked: {:?}", e);
+        }
+    }
 
     Ok(())
 }
