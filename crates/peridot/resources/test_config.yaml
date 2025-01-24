@@ -1,5 +1,9 @@
 io_intensive.wasm:
-    io_max_bandwidth: 1024    # 1024 KB/s
+    args: "test args"
+    peridot_config:
+        io_max_bandwidth: 1024    # 1024 KB/s
 
 cpu_intensive.wasm:
-    io_max_bandwidth: 128    # 128 KB/s
+    args: "test args"
+    peridot_config:
+        io_max_bandwidth: 128    # 128 KB/s

@@ -33,10 +33,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
     let mut store = Store::new(&engine, wasi);
 
-    let module = Module::from_file(&engine, config.configs.keys().next().unwrap().to_string())?;
+    let module_name = config.configs.keys().next().unwrap().to_string();
+    let module = Module::from_file(&engine, &module_name)?;
     linker.module(&mut store, "", &module)?;
     linker
-        .get_default(&mut store, "")?
+        .get_default(&mut store, config.configs.get(&module_name).unwrap().args.as_str())?
         .typed::<(), ()>(&store)?
         .call(&mut store, ())?;
 
