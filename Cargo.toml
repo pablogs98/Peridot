@@ -6,5 +6,5 @@ edition = "2021"
 [dependencies]
 wasmtime = "26.0.0"
 wasi-common = "26.0.0"
-wasmtime-wasi = "26.0.0"
 peridot = { path = "crates/peridot" }
+nix = "0.29.0"
