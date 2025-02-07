@@ -5,6 +5,7 @@ use std::{env, fs, process, thread};
 use nix::libc::read;
 use wasi_common::sync::{Dir, WasiCtxBuilder};
 use wasi_common::{WasiCtx, WasiFile};
+use wasi_common::snapshots::preview_1::types::Errno;
 use wasmtime::*;
 
 unsafe fn intercepted_write(mut caller: Caller<'_, WasiCtx>, fd: i32, iovs_ptr: i32, iovs_len: i32, nwritten: i32) -> i32 {
@@ -20,7 +21,7 @@ unsafe fn intercepted_write(mut caller: Caller<'_, WasiCtx>, fd: i32, iovs_ptr: 
         real_fd = fd + 1;
     }
 
-    let mut bytes_written = 1;
+    let mut bytes_written = 0;
 
     for i in 0..iovs_len {
         let iov_ptr = (iovs_ptr + i * 8) as usize; // 8 = sizeof(Ciovec)
@@ -47,8 +48,6 @@ unsafe fn intercepted_write(mut caller: Caller<'_, WasiCtx>, fd: i32, iovs_ptr: 
     nwritten
 }
 
-
-//inverse, read from fd and write to buffer
 unsafe fn intercepted_read(mut caller: Caller<'_, WasiCtx>, fd: i32, iovs_ptr: i32, iovs_len: i32, nread: i32) -> i32 {
     println!(">[PERIDOT] Intercepted fd_read: fd={}, iovs={}, iovs_len={}, nread={}", fd, iovs_ptr, iovs_len, nread);
 
@@ -62,7 +61,7 @@ unsafe fn intercepted_read(mut caller: Caller<'_, WasiCtx>, fd: i32, iovs_ptr: i
         real_fd = fd + 1;
     }
 
-    let mut bytes_read = 1;
+    let mut bytes_read = 0;
 
     for i in 0..iovs_len {
         let iov_ptr = (iovs_ptr + i * 8) as usize; // 8 = sizeof(Ciovec)
@@ -87,15 +86,10 @@ unsafe fn intercepted_read(mut caller: Caller<'_, WasiCtx>, fd: i32, iovs_ptr: i
             bytes_read += result as i32;
         }
 
-        // print the buffer
-        let s = std::str::from_utf8(&buf).unwrap();
-
-        println!("Buffer: {}", s);
-
         &mem_mut[nread as usize..nread as usize + 4].copy_from_slice(&bytes_read.to_le_bytes());
     }
 
-    nread
+    Errno::Success as i32
 }
 
 fn run_module(module_name: &str, args: &[String]) -> Result<()> {
@@ -117,16 +111,16 @@ fn run_module(module_name: &str, args: &[String]) -> Result<()> {
     linker.allow_shadowing(true);
 
     linker.func_wrap("wasi_snapshot_preview1",
-     "fd_write",
-     move |
-     caller: Caller<'_, WasiCtx>,
-     fd: i32,
-     iovs_ptr: i32,
-     iovs_len: i32,
-     nwritten: i32, |
-     -> i32 { unsafe {
-         intercepted_write(caller, fd, iovs_ptr, iovs_len, nwritten)
-     }})?;
+                     "fd_write",
+                     move |
+                         caller: Caller<'_, WasiCtx>,
+                         fd: i32,
+                         iovs_ptr: i32,
+                         iovs_len: i32,
+                         nwritten: i32, |
+                         -> i32 { unsafe {
+                             intercepted_write(caller, fd, iovs_ptr, iovs_len, nwritten)
+                     }})?;
 
     linker.func_wrap("wasi_snapshot_preview1",
                      "fd_read",
