@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-wasmtime = "26.0.0"
-wasi-common = "26.0.0"
+wasmtime = "29.0.1"
+wasi-common = "29.0.1"
 peridot = { path = "crates/peridot" }
-nix = "0.29.0"
+peridot-custom-ctx = { path = "crates/peridot-custom-ctx" }
