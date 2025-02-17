@@ -1,9 +1,4 @@
-io_intensive.wasm:
-    args: "test args"
+/home/malvarez/Documents/WASM/peridot/wasm/io_test/io_test.wasm:
+    args: [test, args]
     peridot_config:
         io_max_bandwidth: 1024    # 1024 KB/s
-
-cpu_intensive.wasm:
-    args: "test args"
-    peridot_config:
-        io_max_bandwidth: 128    # 128 KB/s

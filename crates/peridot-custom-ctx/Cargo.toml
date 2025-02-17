@@ -1,0 +1,11 @@
+[package]
+name = "peridot-custom-ctx"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wiggle = "29.0.1"
+anyhow = "1.0.95"
+async-trait = "0.1.85"
+wasi-common = "29.0.1"
+wasmtime = "29.0.1"
