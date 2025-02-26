@@ -8,3 +8,4 @@ wasmtime = "29.0.1"
 wasi-common = "29.0.1"
 peridot = { path = "crates/peridot" }
 peridot-custom-ctx = { path = "crates/peridot-custom-ctx" }
+peridot-overseer-grpc = { path = "crates/peridot-overseer-grpc" }

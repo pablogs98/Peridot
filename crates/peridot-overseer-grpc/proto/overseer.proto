@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package overseer;
+
+service Overseer {
+  rpc RegisterModule (ModuleRequest) returns (ModuleResponse);
+  rpc RemoveModule (ModuleRequest) returns (ModuleResponse);
+  rpc UpdateIoStats (UpdateIoStatsRequest) returns (UpdateIoStatsResponse);
+}
+
+message ModuleRequest {
+  uint32 pid = 1;
+}
+
+message UpdateIoStatsRequest {
+  repeated uint32 pids = 1;
+}
+
+message UpdateIoStatsResponse {
+  map<uint32, int32> stats = 1;
+}
+
+message ModuleResponse {
+
+}
