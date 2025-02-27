@@ -1,5 +1,4 @@
 use peridot::token::TokenBucket;
-use peridot_custom_ctx::ctx::PeridotCtx;
 use peridot_overseer_grpc::client::OverseerGrpcClient;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -7,6 +6,12 @@ use std::{env, fs, process, thread};
 use wasi_common::sync::{Dir, WasiCtxBuilder};
 use wasmtime::*;
 use log::error;
+#[cfg(unix)]
+use nix::unistd::{fork, ForkResult};
+#[cfg(unix)]
+use nix::sys::wait::waitpid;
+#[cfg(windows)]
+use std::process::Command;
 
 fn run_module(module_name: &str, overseer_address: &str, args: &[String]) -> Result<()> {
     // Configure engine and linker
@@ -22,8 +27,8 @@ fn run_module(module_name: &str, overseer_address: &str, args: &[String]) -> Res
         .args(args)?
         .build();
 
-    let peridot_ctx = PeridotCtx::new(wasi);
-    peridot_custom_ctx::ctx::add_to_linker(&mut linker, |cx| cx)?;
+    let peridot_ctx = peridot_custom_ctx::clock_ctx::PeridotClockCtx::new(wasi);
+    peridot_custom_ctx::clock_ctx::add_to_linker(&mut linker, |cx| cx)?;
     let mut store = Store::new(&engine, peridot_ctx);
 
     linker.allow_shadowing(true);
@@ -95,21 +100,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         process::exit(1);
     }
 
-    let mut handles = vec![];
+    // print the PID of the main process
+    println!("MAIN");
+    println!("PID: {}", process::id());
+
+    let mut children = vec![];
 
     for (module_name, module_config) in config.into_iter() {
-        let handle = thread::spawn(move || {
-            if let Err(e) = run_module(&module_name, overseer_address, &module_config.args) {
-                error!("Error running module \"{}\": {}", &module_name, e);
+        #[cfg(unix)]
+        match unsafe { fork() } {
+            Ok(ForkResult::Child) => {
+                if let Err(e) = run_module(&module_name, overseer_address, &module_config.args) {
+                    error!("Error running module \"{}\": {}", &module_name, e);
+                }
+                process::exit(0);
             }
-        });
-        handles.push(handle);
+            Ok(ForkResult::Parent { child }) => {
+                println!("Spawned process with PID: {}", child);
+                children.push(child);
+            }
+            Err(e) => {
+                eprintln!("Fork failed: {}", e);
+            }
+        }
+
+        #[cfg(windows)]
+        match Command::new(env::current_exe()?)
+            .arg(&module_name)
+            .args(&module_config.args)
+            .spawn()
+        {
+            Ok(child) => {
+                println!("Spawned process with PID: {}", child.id());
+                children.push(child);
+            }
+            Err(e) => {
+                error!("Failed to spawn process: {}", e);
+            }
+        }
     }
 
-    for handle in handles {
-        if let Err(e) = handle.join() {
-            error!("Thread panicked: {:?}", e);
-        }
+    #[cfg(unix)]
+    for child in children {
+        let _ = waitpid(child, None);
+    }
+
+    #[cfg(windows)]
+    for mut child in children {
+        let _ = child.wait();
     }
 
     Ok(())

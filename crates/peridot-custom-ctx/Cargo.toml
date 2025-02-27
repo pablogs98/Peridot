@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+peridot = { path = "../peridot" }
 wiggle = "29.0.1"
 anyhow = "1.0.95"
 async-trait = "0.1.85"
