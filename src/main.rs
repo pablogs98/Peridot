@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::{env, fs, process, thread};
 use wasi_common::sync::{Dir, WasiCtxBuilder};
 use wasmtime::*;
+use log::error;
 
 fn run_module(module_name: &str, overseer_address: &str, args: &[String]) -> Result<()> {
     // Configure engine and linker
@@ -65,6 +66,11 @@ fn start_update_rate_thread(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if env::var_os("RUST_LOG").is_none() {
+        env::set_var("RUST_LOG", "debug");
+    }
+    env_logger::init();
+
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
         eprintln!(
@@ -94,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (module_name, module_config) in config.into_iter() {
         let handle = thread::spawn(move || {
             if let Err(e) = run_module(&module_name, overseer_address, &module_config.args) {
-                eprintln!("Error running module \"{}\": {}", &module_name, e);
+                error!("Error running module \"{}\": {}", &module_name, e);
             }
         });
         handles.push(handle);
@@ -102,7 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for handle in handles {
         if let Err(e) = handle.join() {
-            eprintln!("Thread panicked: {:?}", e);
+            error!("Thread panicked: {:?}", e);
         }
     }
 

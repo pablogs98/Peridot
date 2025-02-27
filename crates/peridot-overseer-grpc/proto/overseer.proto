@@ -3,12 +3,17 @@ syntax = "proto3";
 package overseer;
 
 service Overseer {
-  rpc RegisterModule (ModuleRequest) returns (ModuleResponse);
-  rpc RemoveModule (ModuleRequest) returns (ModuleResponse);
-  rpc UpdateIoStats (UpdateIoStatsRequest) returns (UpdateIoStatsResponse);
+  rpc RegisterModule (RegisterModuleRequest) returns (ModuleResponse);
+  rpc RemoveModule (RemoveModuleRequest) returns (ModuleResponse);
+  rpc UpdateMaxBandwidth (UpdateIoStatsRequest) returns (UpdateIoStatsResponse);
 }
 
-message ModuleRequest {
+message RegisterModuleRequest {
+  uint32 pid = 1;
+  string name = 2;
+}
+
+message RemoveModuleRequest {
   uint32 pid = 1;
 }
 

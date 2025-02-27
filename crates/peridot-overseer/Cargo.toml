@@ -9,6 +9,8 @@ tokio = { version = "1", features = ["full"] }
 tokio-macros = "2.5.0"
 tonic = "0.12.3"
 peridot-overseer-grpc = { path = "../peridot-overseer-grpc" }
+async-stream = "0.3.6"
+env_logger = "0.11.6"
 
 [build-dependencies]
 tonic-build = "0.12.3"

@@ -1,11 +1,15 @@
-use log::{debug, info, warn};
+mod policy;
+
+use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::{fs, time};
+use tokio::net::UnixListener;
 use tonic::async_trait;
 use tonic::{transport::Server, Request, Response, Status};
+use tonic::codegen::tokio_stream::wrappers::UnixListenerStream;
 use peridot_overseer_grpc::service::overseer_proto::overseer_server::OverseerServer;
 use peridot_overseer_grpc::service::OverseerService;
 
@@ -74,24 +78,35 @@ async fn update_io_stats(io_stats_per_second: Arc<Mutex<HashMap<u32, (Vec<i32>, 
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var_os("RUST_LOG").is_none() {
+        std::env::set_var("RUST_LOG", "debug");
+    }
+    env_logger::init();
+
     let args = std::env::args().collect::<Vec<String>>();
+    if args.len() < 2 {
+        error!("Usage: {} <uds_listen_address>", args[0]);
+        std::process::exit(1);
+    }
+
     let addr = args
         .get(1)
-        .unwrap_or(&String::from("0.0.0.0:50051"))
-        .parse()?;
+        .unwrap_or(&String::from("/tmp/overseer.sock"));
 
     let io_stats_per_second = Arc::new(Mutex::new(HashMap::new()));
 
     // Spawn the periodic task
     tokio::spawn(update_io_stats(io_stats_per_second.clone(), 1));
     let service = OverseerService::new(io_stats_per_second.clone());
-
+    let uds = UnixListener::bind(addr)?;
+    let uds_stream = UnixListenerStream::new(uds);
 
     info!("Overseer running on {}", addr);
 
-    let server_handler = Server::builder()
+    let server_handler =  Server::builder()
         .add_service(OverseerServer::new(service))
-        .serve(addr);
+        .serve_with_incoming(uds_stream)
+        .await?;
 
     Ok(())
 }

@@ -1,7 +1,10 @@
 use std::collections::HashMap;
+use tokio::net::UnixStream;
 use overseer::{overseer_client::OverseerClient, ModuleRequest, UpdateIoStatsRequest};
 use tokio::runtime::Runtime;
-use tonic::transport::Endpoint;
+use tonic::transport::{Endpoint, Uri};
+use tower::service_fn;
+use hyper_util::rt::TokioIo;
 
 pub mod overseer {
     tonic::include_proto!("overseer");
@@ -15,7 +18,11 @@ impl OverseerGrpcClient {
     pub fn new(address: &str) -> OverseerGrpcClient {
         let runtime = Runtime::new().unwrap();
         let channel = runtime
-            .block_on(Endpoint::from_static(address).connect())
+            .block_on(Endpoint::try_from("http://[::]:50051").unwrap()
+                .connect_with_connector(service_fn(|_: Uri| async {
+                    let path = address;
+                    Ok::<_, std::io::Error>(TokioIo::new(UnixStream::connect(path).await?))
+                })))
             .unwrap();
         OverseerGrpcClient {
             client: OverseerClient::new(channel),

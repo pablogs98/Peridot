@@ -12,7 +12,7 @@ pub mod overseer_proto {
 
 use overseer_proto::{
     overseer_server::{Overseer, OverseerServer},
-    ModuleRequest, ModuleResponse, UpdateIoStatsRequest, UpdateIoStatsResponse,
+    RegisterModuleRequest, RemoveModuleRequest, ModuleResponse, UpdateIoStatsRequest, UpdateIoStatsResponse,
 };
 
 #[derive(Default)]
@@ -30,7 +30,7 @@ impl OverseerService {
 impl Overseer for OverseerService {
     async fn register_module(
         &self,
-        request: Request<ModuleRequest>,
+        request: Request<RegisterModuleRequest>,
     ) -> Result<Response<ModuleResponse>, Status> {
         let pid = request.into_inner().pid;
         let mut io_stats = self.io_stats.lock().unwrap();
@@ -41,7 +41,7 @@ impl Overseer for OverseerService {
 
     async fn remove_module(
         &self,
-        request: Request<ModuleRequest>,
+        request: Request<RemoveModuleRequest>,
     ) -> Result<Response<ModuleResponse>, Status> {
         let pid = request.into_inner().pid;
         let mut io_stats = self.io_stats.lock().unwrap();
@@ -51,7 +51,7 @@ impl Overseer for OverseerService {
     }
 
     // change with update_token_bucket rate
-    async fn update_io_stats(
+    async fn update_max_bandwidth(
         &self,
         request: Request<UpdateIoStatsRequest>,
     ) -> Result<Response<UpdateIoStatsResponse>, Status> {
