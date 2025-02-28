@@ -65,9 +65,13 @@ impl TokenBucket {
         debug!("Refill thread started successfully. Max capacity: {} token(s). Refill frequency: {} token(s)/s. ", max_capacity, refill_freq);
         while !end_threads.load(Ordering::Relaxed) {
             let (lock, cvar) = &*tokens;
-            let mut curr_tokens = lock.lock().unwrap();
-            *curr_tokens = std::cmp::min(*curr_tokens + refill_freq, max_capacity);
-            cvar.notify_all();
+            {
+                let mut curr_tokens = lock.lock().unwrap();
+                debug!("Attempting refill. Previous capacity: {}", *curr_tokens);
+                *curr_tokens = std::cmp::min(*curr_tokens + refill_freq, max_capacity);
+                debug!("Performed refill. Current capacity: {}", *curr_tokens);
+                cvar.notify_all();
+            }
             thread::sleep(Duration::from_secs(1)); // Increment every second
         }
     }
@@ -106,6 +110,7 @@ impl Drop for TokenBucket {
 
 #[cfg(test)]
 mod tests {
+    use std::thread::sleep;
     use super::*;
 
     #[test]
@@ -114,8 +119,9 @@ mod tests {
             std::env::set_var("RUST_LOG", "debug");
         }
         env_logger::init();
-        let mut token_bucket = TokenBucket::new(1024, 1024, 1);
+        let mut token_bucket = TokenBucket::new(1024, 2048, 100);
         token_bucket.start_refill_thread();
-        token_bucket.consume(1024, 1);
+        token_bucket.consume(2048);
+        sleep(Duration::from_secs(2));
     }
 }
