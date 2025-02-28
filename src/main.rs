@@ -1,7 +1,7 @@
 use peridot::token::TokenBucket;
-use peridot_overseer_grpc::client::OverseerGrpcClient;
+//use peridot_overseer_grpc::client::OverseerGrpcClient;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{env, fs, process, thread};
 use wasi_common::sync::{Dir, WasiCtxBuilder};
 use wasmtime::*;
@@ -27,7 +27,8 @@ fn run_module(module_name: &str, overseer_address: &str, args: &[String]) -> Res
         .args(args)?
         .build();
 
-    let peridot_ctx = peridot_custom_ctx::clock_ctx::PeridotClockCtx::new(wasi);
+    let token_bucket = Arc::new(Mutex::new(TokenBucket::new(999999999, 999999999, 1)));
+    let peridot_ctx = peridot_custom_ctx::token_ctx::PeridotTokenCtx::new(wasi, token_bucket.clone());
     peridot_custom_ctx::clock_ctx::add_to_linker(&mut linker, |cx| cx)?;
     let mut store = Store::new(&engine, peridot_ctx);
 
@@ -38,10 +39,9 @@ fn run_module(module_name: &str, overseer_address: &str, args: &[String]) -> Res
     linker.module(&mut store, "", &module)?;
 
     // Run the module
-    let token_bucket = Arc::new(TokenBucket::new(1024, 1024, 1));
-    let mut client: Arc<OverseerGrpcClient> = Arc::new(OverseerGrpcClient::new(overseer_address));
-    client.register_module(process::id());
-    let handle = start_update_rate_thread(token_bucket.clone(), end_thread.clone(), client.clone());
+    //let mut client: Arc<OverseerGrpcClient> = Arc::new(OverseerGrpcClient::new(overseer_address));
+    //client.register_module(process::id());
+    let handle = start_update_rate_thread(token_bucket.clone(), end_thread.clone());
 
     linker
         .get_default(&mut store, "")?
@@ -49,22 +49,23 @@ fn run_module(module_name: &str, overseer_address: &str, args: &[String]) -> Res
         .call(&mut store, ())?;
 
     end_thread.store(false, Ordering::Relaxed);
-    handle.join();
-    client.remove_module(process::id());
+    handle.join().unwrap();
+    //client.remove_module(process::id())?;
 
     Ok(())
 }
 
+
 fn start_update_rate_thread(
-    token_bucket: Arc<TokenBucket>,
+    token_bucket: Arc<Mutex<TokenBucket>>,
     end_thread: Arc<AtomicBool>,
-    client: Arc<OverseerGrpcClient>,
+    //client: Arc<OverseerGrpcClient>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        while !*end_thread.load(Ordering::Relaxed) {
-            let new_refill_freq = 0;
+        while !end_thread.load(Ordering::Relaxed) {
+            let new_refill_freq = 1;
             //  todo: grpc stuff
-            token_bucket.refill_freq = new_refill_freq;
+            token_bucket.lock().unwrap().refill_freq = new_refill_freq;
             thread::sleep(std::time::Duration::from_secs(1));
         }
     })
