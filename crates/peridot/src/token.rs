@@ -3,7 +3,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use log::{debug, info, warn};
 
 pub struct TokenBucket {
@@ -63,6 +63,9 @@ impl TokenBucket {
         refill_freq: u32,
     ) {
         debug!("Refill thread started successfully. Max capacity: {} token(s). Refill frequency: {} token(s)/s. ", max_capacity, refill_freq);
+        let interval = Duration::from_secs(1);
+        let mut next_tick = Instant::now();
+
         while !end_threads.load(Ordering::Relaxed) {
             let (lock, cvar) = &*tokens;
             {
@@ -72,7 +75,13 @@ impl TokenBucket {
                 debug!("Performed refill. Current capacity: {}", *curr_tokens);
                 cvar.notify_all();
             }
-            thread::sleep(Duration::from_secs(1)); // Increment every second
+            next_tick += interval;
+            let now = Instant::now();
+            if next_tick > now {
+                thread::sleep(next_tick - now);
+            } else {
+                next_tick = now;
+            }
         }
     }
 
