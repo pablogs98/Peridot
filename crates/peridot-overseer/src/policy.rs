@@ -1,38 +1,43 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
 /// Min-Max Fair Share Control Algorithm
 /// as seen in PAIO: https://www.usenix.org/system/files/fast22-macedo.pdf
 pub struct MinMaxFairShare {
-    max_bandwidth: i32,
-    demands: Vec<f64>,
+    max_bandwidth: f64,
+    demands: Arc<Mutex<HashMap<u32, f64>>>,
+    rates: Arc<Mutex<HashMap<u32, f64>>>,
 }
 
 impl MinMaxFairShare {
-    pub fn new(max_bandwidth: i32, demands: Vec<f64>) -> MinMaxFairShare {
+    pub fn new(
+        max_bandwidth: f64,
+        demands: Arc<Mutex<HashMap<u32, f64>>>,
+        rates: Arc<Mutex<HashMap<u32, f64>>>,
+    ) -> MinMaxFairShare {
         MinMaxFairShare {
             max_bandwidth,
             demands,
+            rates,
         }
     }
 
-    fn allocate_bandwidth(mut demands: Vec<f64>, max_b: f64) -> Vec<f64> {
-        let mut rates = vec![0.0; demands.len()];
-        let mut left_bandwidth = max_b;
-        let mut active = demands.len();
+    pub async fn allocate_bandwidth(&self) {
+        let mut left_bandwidth = self.max_bandwidth;
+        let mut active = self.demands.lock().await.len();
+        let demands_vec: Vec<(&u32, &f64)> = self.demands.lock().await.collect();
 
-        for i in 0..active {
-            let fair_share = left_bandwidth / (active - i) as f64;
+        for (key, &demand) in demands_vec {
+            let fair_share = left_bandwidth / active as f64;
 
-            if demands[i] <= fair_share {
-                rates[i] = demands[i];
+            if demand <= fair_share {
+                self.rates.lock().await.insert(key.clone(), demand);
             } else {
-                rates[i] = fair_share;
+                self.rates.lock().await.insert(key.clone(), fair_share);
             }
-            left_bandwidth -= rates[i];
+            left_bandwidth -= self.rates[key];
+            active -= 1;
         }
-
-        for i in 0..active {
-            rates[i] = left_bandwidth / active as f64;
-        }
-
-        rates
     }
 }

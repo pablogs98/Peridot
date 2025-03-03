@@ -5,24 +5,24 @@ package overseer;
 service Overseer {
   rpc RegisterModule (RegisterModuleRequest) returns (ModuleResponse);
   rpc RemoveModule (RemoveModuleRequest) returns (ModuleResponse);
-  rpc UpdateMaxBandwidth (UpdateIoStatsRequest) returns (UpdateIoStatsResponse);
+  rpc UpdateMaxBandwidth (UpdateMaxBandwidthRequest) returns (UpdateMaxBandwidthResponse);
 }
 
 message RegisterModuleRequest {
   uint32 pid = 1;
-  string name = 2;
+  double demand = 2;
 }
 
 message RemoveModuleRequest {
   uint32 pid = 1;
 }
 
-message UpdateIoStatsRequest {
+message UpdateMaxBandwidthRequest {
   repeated uint32 pids = 1;
 }
 
-message UpdateIoStatsResponse {
-  map<uint32, int32> stats = 1;
+message UpdateMaxBandwidthResponse {
+  map<uint32, double> stats = 1;
 }
 
 message ModuleResponse {

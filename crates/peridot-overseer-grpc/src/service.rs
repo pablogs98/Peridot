@@ -1,6 +1,7 @@
 use log::info;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::{Mutex};
 use std::time::Duration;
 use tokio::{fs, time};
 use tonic::async_trait;
@@ -12,17 +13,19 @@ pub mod overseer_proto {
 
 use overseer_proto::{
     overseer_server::{Overseer, OverseerServer},
-    RegisterModuleRequest, RemoveModuleRequest, ModuleResponse, UpdateIoStatsRequest, UpdateIoStatsResponse,
+    ModuleResponse, RegisterModuleRequest, RemoveModuleRequest, UpdateMaxBandwidthRequest,
+    UpdateMaxBandwidthResponse,
 };
 
 #[derive(Default)]
 pub struct OverseerService {
-    io_stats: Arc<Mutex<HashMap<u32, (Vec<i32>, Vec<i32>)>>>,
+    rates: Arc<Mutex<HashMap<u32, f64>>>,
+    demands: Arc<Mutex<HashMap<u32, f64>>>
 }
 
 impl OverseerService {
-    pub fn new(io_stats: Arc<Mutex<HashMap<u32, (Vec<i32>, Vec<i32>)>>>) -> Self {
-        Self { io_stats }
+    pub fn new(demands: Arc<Mutex<HashMap<u32, f64>>>, rates: Arc<Mutex<HashMap<u32, f64>>>) -> Self {
+        Self { demands, rates }
     }
 }
 
@@ -32,9 +35,10 @@ impl Overseer for OverseerService {
         &self,
         request: Request<RegisterModuleRequest>,
     ) -> Result<Response<ModuleResponse>, Status> {
-        let pid = request.into_inner().pid;
-        let mut io_stats = self.io_stats.lock().unwrap();
-        io_stats.insert(pid, (Vec::new(), Vec::new()));
+        let inner = request.into_inner();
+        let pid = inner.pid;
+        let demand = inner.demand;
+        self.demands.lock().await.insert(pid, demand);
         info!("Registered module with PID: {}", pid);
         Ok(Response::new(ModuleResponse {}))
     }
@@ -44,22 +48,25 @@ impl Overseer for OverseerService {
         request: Request<RemoveModuleRequest>,
     ) -> Result<Response<ModuleResponse>, Status> {
         let pid = request.into_inner().pid;
-        let mut io_stats = self.io_stats.lock().unwrap();
-        io_stats.remove(&pid);
+        self.demands.lock().await.remove(&pid);
         info!("Removed module with PID: {}", pid);
         Ok(Response::new(ModuleResponse {}))
     }
 
-    // change with update_token_bucket rate
     async fn update_max_bandwidth(
         &self,
-        request: Request<UpdateIoStatsRequest>,
-    ) -> Result<Response<UpdateIoStatsResponse>, Status> {
-        let pids = request.into_inner().pids;
-        let stats = Vec::new();
-        let response = UpdateIoStatsResponse {
-            stats: stats.into_iter().collect(),
-        };
+        request: Request<UpdateMaxBandwidthRequest>,
+    ) -> Result<Response<UpdateMaxBandwidthResponse>, Status> {
+        let pids: Vec<u32> = request.into_inner().pids;
+        let mut stats: HashMap<u32, f64> = HashMap::new();
+
+        for pid in pids {
+            if let Some(rate) = self.rates.lock().await.get(&pid) {
+                stats.insert(pid, *rate);
+            }
+        }
+
+        let response = UpdateMaxBandwidthResponse { stats };
         Ok(Response::new(response))
     }
 }
