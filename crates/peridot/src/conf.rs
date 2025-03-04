@@ -9,7 +9,7 @@ pub type PeridotConfig = HashMap<String, PeridotConfigEntry>;
 
 #[derive(Deserialize)]
 pub struct PeridotConfigEntry {
-    pub peridot_config: HashMap<String, u32>,
+    pub peridot_config: HashMap<String, f64>,
     pub args: Vec<String>,
 }
 pub fn new_config<P: AsRef<Path>>(path: P) -> Result<PeridotConfig, Box<dyn std::error::Error>> {
@@ -25,6 +25,6 @@ mod tests {
     #[test]
     fn it_works() {
         let config = new_config("resources/test_config.yaml").unwrap();
-        assert_eq!(config.get("io_intensive.wasm").unwrap().peridot_config.get("io_max_bandwidth").unwrap(), &1024);
+        assert_eq!(config.get("io_intensive.wasm").unwrap().peridot_config.get("io_max_bandwidth").unwrap(), &1024.0);
     }
 }

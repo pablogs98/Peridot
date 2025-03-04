@@ -47,8 +47,8 @@ impl OverseerGrpcClient {
         }
     }
 
-    pub fn update_max_bandwidth(&mut self, pid: u32) -> HashMap<u32, f64> {
-        let stats_request = tonic::Request::new(UpdateMaxBandwidthRequest { pids: vec![pid] });
+    pub fn update_max_bandwidth(&mut self, pids: Vec<u32>) -> HashMap<u32, f64> {
+        let stats_request = tonic::Request::new(UpdateMaxBandwidthRequest { pids });
         let result = self
             .runtime
             .block_on(self.client.update_max_bandwidth(stats_request));

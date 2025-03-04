@@ -7,16 +7,16 @@ use std::time::{Duration, Instant};
 use log::{debug, info, warn};
 
 pub struct TokenBucket {
-    max_capacity: u32,
-    tokens: Arc<(Mutex<u32>, Condvar)>,
-    pub refill_freq: u32,
+    max_capacity: u64,
+    tokens: Arc<(Mutex<u64>, Condvar)>,
+    refill_freq: u64,
     refill_thread_handle: Option<JoinHandle<()>>,
     end_threads: Arc<AtomicBool>,
     stats: HashMap<i32, Vec<i32>>,
 }
 
 impl TokenBucket {
-    pub fn new(initial_tokens: u32, max_capacity: u32, refill_freq: u32) -> TokenBucket {
+    pub fn new(initial_tokens: u64, max_capacity: u64, refill_freq: u64) -> TokenBucket {
         let tokens = Arc::new((Mutex::new(initial_tokens), Condvar::new()));
         TokenBucket {
             max_capacity,
@@ -28,7 +28,12 @@ impl TokenBucket {
         }
     }
 
-    fn do_consume(&self, n_tokens: u32) {
+    pub fn set_max_capacity(&mut self, max_capacity: u64) {
+        self.max_capacity = max_capacity;
+        self.refill_freq = max_capacity;
+    }
+
+    fn do_consume(&self, n_tokens: u64) {
         let (lock, cvar) = &*self.tokens;
         {
             let mut curr_tokens = lock.lock().unwrap();
@@ -39,7 +44,7 @@ impl TokenBucket {
         }
     }
 
-    pub fn consume(&self, n_tokens: u32) {
+    pub fn consume(&self, n_tokens: u64) {
         if n_tokens > self.max_capacity {
             let mut tokens_left = n_tokens;
             while tokens_left > 0 {
@@ -57,10 +62,10 @@ impl TokenBucket {
     }
 
     fn refill(
-        tokens: Arc<(Mutex<u32>, Condvar)>,
+        tokens: Arc<(Mutex<u64>, Condvar)>,
         end_threads: Arc<AtomicBool>,
-        max_capacity: u32,
-        refill_freq: u32,
+        max_capacity: u64,
+        refill_freq: u64,
     ) {
         debug!("Refill thread started successfully. Max capacity: {} token(s). Refill frequency: {} token(s)/s. ", max_capacity, refill_freq);
         let interval = Duration::from_secs(1);

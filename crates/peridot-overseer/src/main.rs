@@ -1,6 +1,7 @@
 mod policy;
 
 use crate::policy::MinMaxFairShare;
+use clap::Parser;
 use log::{debug, error, info, warn};
 use peridot_overseer_grpc::service::overseer_proto::overseer_server::OverseerServer;
 use peridot_overseer_grpc::service::OverseerService;
@@ -14,6 +15,28 @@ use tokio::{fs, time};
 use tonic::async_trait;
 use tonic::codegen::tokio_stream::wrappers::UnixListenerStream;
 use tonic::{transport::Server, Request, Response, Status};
+
+/// Peridot Overseer
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Unix Domain Socket (UDS) address (e.g. /tmp/peridot.sock)
+    #[arg(required = true)]
+    address: String,
+
+    /// Max I/O bandwidth (B/s)
+    #[arg(required = true)]
+    max_bandwidth: f64,
+
+    /// Update interval (s)
+    #[arg(short, long, default_value_t = 1)]
+    update_interval: u64,
+
+    /// Log level (e.g. debug, info, warn, error). Defaults to "info".
+    /// Overridden by RUST_LOG env var if set.
+    #[arg(short, long, default_value_t = "info")]
+    log_level: String,
+}
 
 struct IoStats {
     read_bytes: i32,
@@ -85,22 +108,16 @@ async fn update_io_stats(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn error::Error>> {
+    let args = Args::parse();
+
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "debug");
     }
     env_logger::init();
 
-    let args = std::env::args().collect::<Vec<String>>();
-    if args.len() < 4 {
-        error!(
-            "Usage: {} <uds_listen_address> <max_bandwidth> <update_interval>",
-            args[0]
-        );
-        std::process::exit(1);
-    }
-    let addr = args.get(1).unwrap();
-    let max_bandwidth = args.get(2).unwrap().parse::<f64>().unwrap();
-    let update_interval = args.get(3).unwrap().parse::<u64>().unwrap();
+    let addr = &args.address;
+    let max_bandwidth = args.max_bandwidth;
+    let update_interval = args.update_interval;
 
     let rates: Arc<Mutex<HashMap<u32, f64>>> = Arc::new(Mutex::new(HashMap::new()));
     let demands: Arc<Mutex<HashMap<u32, f64>>> = Arc::new(Mutex::new(HashMap::new()));

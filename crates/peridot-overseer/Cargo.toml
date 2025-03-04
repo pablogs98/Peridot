@@ -11,6 +11,7 @@ tonic = "0.12.3"
 peridot-overseer-grpc = { path = "../peridot-overseer-grpc" }
 async-stream = "0.3.6"
 env_logger = "0.11.6"
+clap = { version = "4.5.31", features = ["derive"] }
 
 [build-dependencies]
 tonic-build = "0.12.3"

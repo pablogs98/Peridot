@@ -12,3 +12,4 @@ nix = { version = "0.29.0", features = ["process"] }
 peridot-overseer-grpc = { path = "crates/peridot-overseer-grpc" }
 env_logger = "0.11.6"
 log = "0.4.26"
+clap = { version = "4.5.31", features = ["derive"] }
