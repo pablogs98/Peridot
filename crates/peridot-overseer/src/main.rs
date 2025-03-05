@@ -1,26 +1,26 @@
 mod policy;
 
-use std::error;
 use crate::policy::MinMaxFairShare;
 use clap::Parser;
 use log::{info, warn};
 use peridot_overseer_grpc::service::overseer_proto::overseer_server::OverseerServer;
 use peridot_overseer_grpc::service::OverseerService;
 use std::collections::HashMap;
+use std::error;
 use std::fs::remove_file;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::UnixListener;
-use tokio::sync::Mutex;
-use tokio::{fs, time};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+use tokio::net::UnixListener;
 use tokio::signal::unix::{signal, SignalKind};
+use tokio::sync::Mutex;
 use tokio::time::Instant;
+use tokio::{fs, time};
 use tonic::codegen::tokio_stream::wrappers::UnixListenerStream;
-use tonic::{transport::Server};
+use tonic::transport::Server;
 
 /// Peridot Overseer
 #[derive(Parser, Debug)]
@@ -80,13 +80,14 @@ async fn update_io_stats(
     demands: Arc<Mutex<HashMap<u32, f64>>>,
     max_bandwidth: f64,
     interval: u64,
-    end_thread: Arc<AtomicBool>
+    end_thread: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn error::Error + Send + Sync>> {
     let mut io_stats: IoStatsMap = IoStatsMap::default();
     let mut interval = time::interval(Duration::from_secs(interval));
     let policy = MinMaxFairShare::new(max_bandwidth, demands.clone(), rates.clone());
     let mut file = File::create("/tmp/io_stats.txt").await?;
-    file.write("timestamp_ms,pid,read_bytes,write_bytes\n".as_bytes()).await?;
+    file.write("timestamp_ms,pid,read_bytes,write_bytes\n".as_bytes())
+        .await?;
     let start = Instant::now();
 
     while !end_thread.load(Ordering::Relaxed) {
@@ -96,7 +97,7 @@ async fn update_io_stats(
 
         interval.tick().await;
         policy.allocate_bandwidth().await;
-
+        let mut to_remove = Vec::new();
         for pid in keys {
             if let Some(stats) = read_io_stats(pid).await {
                 let curr_read_bytes = stats.read_bytes;
@@ -105,13 +106,21 @@ async fn update_io_stats(
                     let read_bytes = curr_read_bytes - prev_stats.read_bytes;
                     let write_bytes = curr_write_bytes - prev_stats.write_bytes;
                     let timestamp = start.elapsed().as_millis();
-                    file.write_all(format!("{},{},{},{}\n", timestamp, pid, read_bytes, write_bytes).as_bytes()).await.unwrap();
-
+                    file.write_all(
+                        format!("{},{},{},{}\n", timestamp, pid, read_bytes, write_bytes)
+                            .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
                 }
                 io_stats.insert(pid, stats);
             } else {
-                warn!("Failed to read io stats for PID: {}", pid);
+                warn!("Failed to read io stats for PID: {}. Removing task.", pid);
+                to_remove.push(pid);
             }
+        }
+        for pid in to_remove {
+            demands.lock().await.remove(&pid);
         }
     }
     Ok(())
@@ -139,7 +148,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         demands.clone(),
         max_bandwidth,
         update_interval,
-        end_thread.clone()
+        end_thread.clone(),
     ));
     let service = OverseerService::new(demands.clone(), rates.clone());
     let uds = UnixListener::bind(addr)?;
@@ -153,7 +162,9 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         .await?;
 
     end_thread.store(true, Ordering::Relaxed);
-    update_io_stats_future.await?.expect("Error joining I/O stats update task");
+    update_io_stats_future
+        .await?
+        .expect("Error joining I/O stats update task");
     remove_file(addr)?;
     Ok(())
 }
