@@ -1,3 +1,4 @@
+use crate::client::overseer::RemoveModuleRequest;
 use hyper_util::rt::TokioIo;
 use overseer::{overseer_client::OverseerClient, RegisterModuleRequest, UpdateMaxBandwidthRequest};
 use std::collections::HashMap;
@@ -5,7 +6,6 @@ use tokio::net::UnixStream;
 use tokio::runtime::Runtime;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
-use crate::client::overseer::RemoveModuleRequest;
 
 pub mod overseer {
     tonic::include_proto!("overseer");
@@ -18,12 +18,18 @@ pub struct OverseerGrpcClient {
 impl OverseerGrpcClient {
     pub fn new(address: &str) -> OverseerGrpcClient {
         let runtime = Runtime::new().unwrap();
+        let address_owned = address.to_owned();
         let channel = runtime
             .block_on(
                 Endpoint::try_from("http://[::]:50051")
                     .unwrap()
-                    .connect_with_connector(service_fn(|_: Uri| async {
-                        Ok::<_, std::io::Error>(TokioIo::new(UnixStream::connect(address).await?))
+                    .connect_with_connector(service_fn(move |_: Uri| {
+                        let address = address_owned.clone();
+                        async move {
+                            Ok::<_, std::io::Error>(TokioIo::new(
+                                UnixStream::connect(address).await?,
+                            ))
+                        }
                     })),
             )
             .unwrap();
@@ -34,10 +40,7 @@ impl OverseerGrpcClient {
     }
 
     pub fn register_module(&mut self, pid: u32, demand: f64) -> Result<(), tonic::Status> {
-        let register_request = tonic::Request::new(RegisterModuleRequest {
-            pid,
-            demand,
-        });
+        let register_request = tonic::Request::new(RegisterModuleRequest { pid, demand });
         let result = self
             .runtime
             .block_on(self.client.register_module(register_request));

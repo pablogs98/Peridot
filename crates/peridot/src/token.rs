@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -11,8 +10,7 @@ pub struct TokenBucket {
     tokens: Arc<(Mutex<u64>, Condvar)>,
     refill_freq: u64,
     refill_thread_handle: Option<JoinHandle<()>>,
-    end_threads: Arc<AtomicBool>,
-    stats: HashMap<i32, Vec<i32>>,
+    end_threads: Arc<AtomicBool>
 }
 
 impl TokenBucket {
@@ -23,8 +21,7 @@ impl TokenBucket {
             tokens,
             refill_freq,
             refill_thread_handle: None,
-            end_threads: Arc::new(AtomicBool::new(false)),
-            stats: HashMap::new(),
+            end_threads: Arc::new(AtomicBool::new(false))
         }
     }
 

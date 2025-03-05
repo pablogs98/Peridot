@@ -5,9 +5,9 @@ use nix::unistd::{fork, ForkResult};
 use peridot::token::TokenBucket;
 use peridot_overseer_grpc::client::OverseerGrpcClient;
 use std::collections::HashMap;
-use std::io::{BufReader, Read};
+use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{env, fs, process, thread};
@@ -25,16 +25,16 @@ struct Args {
     config_path: String,
 
     /// Enable Overseer (only if Overseer is running). Defaults to false.
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short='o', long, default_value_t = false)]
     overseer_enabled: bool,
 
     /// Overseer Unix Domain Socket address (e.g. /tmp/peridot.sock)
-    #[arg(short, long, required_if_eq("overseer_enabled", true))]
+    #[arg(short='a', long, required=false, required_if_eq("overseer_enabled", "true"))]
     overseer_address: String,
 
     /// Log level (e.g. debug, info, warn, error). Defaults to "info".
     /// Overridden by RUST_LOG env var if set.
-    #[arg(short, long, default_value_t = "info")]
+    #[arg(short, long, default_value = "info")]
     log_level: String,
 }
 
@@ -143,7 +143,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut children = vec![];
     let mut pipes: HashMap<u32, UnixStream> = HashMap::new();
-    let mut client: Arc<OverseerGrpcClient> = Arc::new(OverseerGrpcClient::new(overseer_address));
+    let mut client = None;
+    if args.overseer_enabled {
+        client = Some(OverseerGrpcClient::new(overseer_address));
+    }
 
     // todo: what happens if the parent process is killed? Use UNIX process groups and signal handling
     for (module_path, module_config) in config.into_iter() {
@@ -156,14 +159,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 process::exit(0);
             }
             Ok(ForkResult::Parent { child }) => {
-                client.register_module(
-                    child.as_raw() as u32,
-                    *module_config.peridot_config.get("demand").unwrap(),
-                )?;
-                pipes.insert(
-                    child.as_raw() as u32,
-                    UnixStream::connect(format!("{}_pipe", child.as_raw()))?,
-                );
+                if client.is_some() {
+                    client.as_mut().unwrap().register_module(
+                        child.as_raw() as u32,
+                        *module_config.peridot_config.get("demand").unwrap(),
+                    )?;
+                    pipes.insert(
+                        child.as_raw() as u32,
+                        UnixStream::connect(format!("{}_pipe", child.as_raw()))?,
+                    );
+                }
                 debug!("Spawned process with PID: {}", child);
                 children.push(child);
             }
@@ -178,14 +183,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while !children.is_empty() {
         let mut to_remove = vec![];
-        let updated_bandwidth =
-            client.update_max_bandwidth(children.iter().map(|pid| pid.as_raw() as u32).collect());
-        communicate_updates(&updated_bandwidth, &pipes);
+        if let Some(ref mut client) = client {
+            let updated_bandwidth = client.update_max_bandwidth(children.iter().map(|pid| pid.as_raw() as u32).collect());
+            communicate_updates(&updated_bandwidth, &pipes);
+        }
 
         for (index, pid) in children.iter().enumerate() {
             match waitpid(Some(*pid), Some(WaitPidFlag::WNOHANG)) {
                 Ok(WaitStatus::Exited(_, status)) => {
-                    client.remove_module(*pid.as_raw() as u32)?;
+                    if let Some(ref mut client) = client {
+                        client.remove_module(pid.as_raw() as u32)?;
+                    }
                     debug!("Process {} exited with status {}", pid, status);
                     to_remove.push(index);
                 }
@@ -202,6 +210,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 next_tick = now;
             }
+        }
+        for index in to_remove.iter().rev() {
+            children.remove(*index);
         }
     }
     Ok(())

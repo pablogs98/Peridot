@@ -1,11 +1,10 @@
 use std::ops::Deref;
-use log::info;
 use log::debug;
 use std::sync::{Arc, Mutex};
 use peridot::token::TokenBucket;
 use wasi_common::snapshots::preview_1::types::{Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta, Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights, Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence};
 use wasi_common::snapshots::preview_1::wasi_snapshot_preview1::WasiSnapshotPreview1;
-use wasi_common::{Error, ErrorExt, WasiCtx};
+use wasi_common::{Error, WasiCtx};
 use wiggle::{GuestMemory, GuestPtr};
 pub struct PeridotTokenCtx {
     inner: WasiCtx,
@@ -113,8 +112,6 @@ impl WasiSnapshotPreview1 for PeridotTokenCtx {
     }
 
     async fn fd_read(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: IovecArray) -> Result<Size, Error> {
-        let ctx = self.get_inner();
-
         let mut bytes_to_read = 0;
 
         for i in 0..iovs.len() {
@@ -130,7 +127,7 @@ impl WasiSnapshotPreview1 for PeridotTokenCtx {
             bytes_to_read += buf_len as i32;
         }
 
-        self.bucket.lock().unwrap().consume(bytes_to_read as u32);
+        self.bucket.lock().unwrap().consume(bytes_to_read as u64);
 
         debug!("Tokens consumed in fd_read: {}", bytes_to_read);
 
@@ -158,8 +155,6 @@ impl WasiSnapshotPreview1 for PeridotTokenCtx {
     }
 
     async fn fd_write(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: CiovecArray) -> Result<Size, Error> {
-        let ctx = self.get_inner();
-
         let mut bytes_to_write = 0;
 
         for i in 0..iovs.len() {
@@ -175,7 +170,7 @@ impl WasiSnapshotPreview1 for PeridotTokenCtx {
             bytes_to_write += buf_len as i32;
         }
 
-        self.bucket.lock().unwrap().consume(bytes_to_write as u32);
+        self.bucket.lock().unwrap().consume(bytes_to_write as u64);
         println!("Tokens consumed in fd_write: {}", bytes_to_write);
 
         WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await

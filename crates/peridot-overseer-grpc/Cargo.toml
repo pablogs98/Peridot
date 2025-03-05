@@ -10,6 +10,9 @@ tokio-macros = "2.5.0"
 tonic = "0.12.3"
 tower = "0.5.2"
 hyper-util = "0.1.10"
+prost = "0.13.5"
+prost-types = "0.13.5"
 
 [build-dependencies]
 tonic-build = "0.12.3"
+prost-build = "0.13.5"

@@ -26,17 +26,17 @@ impl MinMaxFairShare {
     pub async fn allocate_bandwidth(&self) {
         let mut left_bandwidth = self.max_bandwidth;
         let mut active = self.demands.lock().await.len();
-        let demands_vec: Vec<(&u32, &f64)> = self.demands.lock().await.collect();
+        let demands_lock = self.demands.lock().await;
 
-        for (key, &demand) in demands_vec {
+        for (key, &demand) in demands_lock.iter() {
             let fair_share = left_bandwidth / active as f64;
 
             if demand <= fair_share {
-                self.rates.lock().await.insert(key.clone(), demand);
+                self.rates.lock().await.insert(*key, demand);
             } else {
-                self.rates.lock().await.insert(key.clone(), fair_share);
+                self.rates.lock().await.insert(*key, fair_share);
             }
-            left_bandwidth -= self.rates[key];
+            left_bandwidth -= self.rates.lock().await[&key];
             active -= 1;
         }
     }

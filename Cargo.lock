@@ -1388,6 +1388,9 @@ version = "0.1.0"
 dependencies = [
  "hyper-util",
  "log",
+ "prost",
+ "prost-build",
+ "prost-types",
  "tokio",
  "tokio-macros",
  "tonic",
