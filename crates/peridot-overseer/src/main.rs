@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::net::UnixListener;
 use tokio::sync::Mutex;
-use tokio::{fs, signal, time};
+use tokio::{fs, time};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::signal::unix::{signal, SignalKind};

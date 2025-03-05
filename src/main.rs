@@ -24,13 +24,9 @@ struct Args {
     #[arg(required = true)]
     config_path: String,
 
-    /// Enable Overseer (only if Overseer is running). Defaults to false.
-    #[arg(short='o', long, default_value_t = false)]
-    overseer_enabled: bool,
-
     /// Overseer Unix Domain Socket address (e.g. /tmp/peridot.sock)
-    #[arg(short='a', long, required=false, required_if_eq("overseer_enabled", "true"))]
-    overseer_address: String,
+    #[arg(short = 'o', long, required = false)]
+    overseer_address: Option<String>,
 
     /// Log level (e.g. debug, info, warn, error). Defaults to "info".
     /// Overridden by RUST_LOG env var if set.
@@ -144,8 +140,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut children = vec![];
     let mut pipes: HashMap<u32, UnixStream> = HashMap::new();
     let mut client = None;
-    if args.overseer_enabled {
-        client = Some(OverseerGrpcClient::new(overseer_address));
+    if let Some(ref address) = overseer_address {
+        client = Some(OverseerGrpcClient::new(address));
     }
 
     // todo: what happens if the parent process is killed? Use UNIX process groups and signal handling
@@ -184,7 +180,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while !children.is_empty() {
         let mut to_remove = vec![];
         if let Some(ref mut client) = client {
-            let updated_bandwidth = client.update_max_bandwidth(children.iter().map(|pid| pid.as_raw() as u32).collect());
+            let updated_bandwidth = client
+                .update_max_bandwidth(children.iter().map(|pid| pid.as_raw() as u32).collect());
             communicate_updates(&updated_bandwidth, &pipes);
         }
 
