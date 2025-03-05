@@ -24,7 +24,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let config = new_config("resources/test_config.yaml").unwrap();
+        let config = new_config("../resources/example_config.yaml").unwrap();
         assert_eq!(config.get("io_intensive.wasm").unwrap().peridot_config.get("io_max_bandwidth").unwrap(), &1024.0);
     }
 }
