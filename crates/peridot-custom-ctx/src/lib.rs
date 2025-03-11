@@ -1,5 +1,6 @@
 pub mod clock_ctx;
 pub mod token_ctx;
+mod geds_ctx;
 
 #[macro_export]
 macro_rules! define_wasi {
