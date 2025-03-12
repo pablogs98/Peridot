@@ -47,7 +47,7 @@ fn run_module(module_path: &str, args: &[String]) -> Result<()> {
         .args(args)?
         .build();
 
-    let token_bucket = Arc::new(Mutex::new(TokenBucket::new(999999999, 999999999, 1)));
+    let token_bucket = Arc::new(Mutex::new(TokenBucket::new(0, 500000000, 1)));
     let peridot_ctx =
         peridot_custom_ctx::token_ctx::PeridotTokenCtx::new(wasi, token_bucket.clone());
     peridot_custom_ctx::clock_ctx::add_to_linker(&mut linker, |cx| cx)?;
@@ -63,7 +63,7 @@ fn run_module(module_path: &str, args: &[String]) -> Result<()> {
     let handle = start_update_rate_thread(
         token_bucket.clone(),
         end_thread.clone(),
-        format!("{}_pipe", process::id()),
+        format!("/tmp/{}_pipe", process::id()),
     );
     linker
         .get_default(&mut store, "")?
@@ -160,9 +160,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         child.as_raw() as u32,
                         *module_config.peridot_config.get("demand").unwrap(),
                     )?;
+                    // wait until /tmp/{pid}_pipe is created
+                    while !fs::metadata(format!("/tmp/{}_pipe", child.as_raw())).is_ok() { thread::sleep(Duration::from_millis(100)); }
                     pipes.insert(
                         child.as_raw() as u32,
-                        UnixStream::connect(format!("{}_pipe", child.as_raw()))?,
+                        UnixStream::connect(format!("/tmp/{}_pipe", child.as_raw()))?,
                     );
                 }
                 debug!("Spawned process with PID: {}", child);
