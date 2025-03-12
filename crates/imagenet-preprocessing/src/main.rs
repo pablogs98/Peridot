@@ -1,16 +1,38 @@
+use std::env::args;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
 fn main() {
-    let image_paths = ["fixture/two/tabby.png","fixture/two/banana.jpg", "fixture/two/cougar.jpg"];
-    let image_paths = image_paths.iter().map(|p| PathBuf::from(p)).collect::<Vec<PathBuf>>();
-    let images  = read_images(&image_paths).unwrap();
+    let args = args().collect::<Vec<String>>();
+    if args.len() != 2 {
+        println!("Usage: imagenet-preprocessing <use_geds:true|false>");
+        return;
+    }
+    let use_geds = args[1].parse::<bool>().unwrap();
+
+    let image_paths = [
+        "fixture/two/tabby.png",
+        "fixture/two/banana.jpg",
+        "fixture/two/cougar.jpg",
+    ];
+    let image_paths = image_paths
+        .iter()
+        .map(|p| PathBuf::from(p))
+        .collect::<Vec<PathBuf>>();
+    let images = read_images(&image_paths).unwrap();
     let batch_tensors = preprocess(&images);
     // Write batch_tensors to files
     for (i, tensor) in batch_tensors.iter().enumerate() {
-        let file_name = format!("tensor_{}.bin", i);
+        let file_name;
+        if use_geds {
+            file_name = format!("geds://tensor_{}.bin", i);
+            write_tensor_to_file(&file_name, tensor).unwrap();
+            continue;
+        } else {
+            file_name = format!("tensor_{}.bin", i);
+        }
         write_tensor_to_file(&file_name, tensor).unwrap();
     }
 }
@@ -33,7 +55,13 @@ fn read_images(image_paths: &[PathBuf]) -> Result<Vec<Vec<u8>>, ()> {
 fn preprocess(images: &[Vec<u8>]) -> Vec<Vec<u8>> {
     let mut processed_images = Vec::new();
     for image in images {
-        let processed_image = preprocess_one(image, 224, 224, &[0.485, 0.456, 0.406], &[0.229, 0.224, 0.225]);
+        let processed_image = preprocess_one(
+            image,
+            224,
+            224,
+            &[0.485, 0.456, 0.406],
+            &[0.229, 0.224, 0.225],
+        );
         processed_images.push(processed_image);
     }
     processed_images
