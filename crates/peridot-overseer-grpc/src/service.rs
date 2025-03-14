@@ -37,7 +37,7 @@ impl Overseer for OverseerService {
         let pid = inner.pid;
         let demand = inner.demand;
         self.demands.lock().await.insert(pid, demand);
-        info!("Registered module with PID: {}", pid);
+        info!("Registered module with PID: {} and demand: {}", pid, demand);
         Ok(Response::new(ModuleResponse {}))
     }
 
@@ -61,6 +61,7 @@ impl Overseer for OverseerService {
         for pid in pids {
             if let Some(rate) = self.rates.lock().await.get(&pid) {
                 stats.insert(pid, *rate);
+                info!("Updated bandwidth for PID: {} to {}", pid, rate);
             }
         }
 

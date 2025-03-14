@@ -14,7 +14,7 @@ double randfrom(double min, double max)
 double get_current_time() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000.0;
+    return ts.tv_sec + ts.tv_nsec / 1.0e9;
 }
 
 int main(int argc, char *argv[]) {
@@ -28,7 +28,12 @@ int main(int argc, char *argv[]) {
     char *FILE_NAME = argv[1];
     double execution_time = atof(argv[2]);
 
-    int buffer_sizes[] = {1024, 4096, 16384, 65536, 262144};
+    int buffer_sizes[] = {1024*1024*62, 1024*1024*70, 1024*1024*80, 1024*1024*85, 1024*1024*90};
+    char *buffer = malloc(buffer_sizes[4]);
+
+    for (int i = 0; i < buffer_sizes[4]; i++) {
+        buffer[i] = rand() % 256;
+    }
 
     FILE *file = fopen(FILE_NAME, "a");
 
@@ -41,16 +46,12 @@ int main(int argc, char *argv[]) {
 
     while (1) {
         if (get_current_time() - start_time > execution_time) {
+            printf("Exiting\n");
             break;
         }
 
         // pick a random buffer size
         int buffer_size = buffer_sizes[rand() % 5];
-        char *buffer = malloc(buffer_size);
-
-        for (int i = 0; i < buffer_size; i++) {
-            buffer[i] = rand() % 256;
-        }
 
         fwrite(buffer, 1, buffer_size, file);
 
@@ -58,9 +59,9 @@ int main(int argc, char *argv[]) {
 
         //sleep for a random time between 0.2 and 0.5 seconds
         usleep(randfrom(200000, 500000));
-        free(buffer);
     }
 
+    free(buffer);
     fclose(file);
     printf("Execution time: %f\n", execution_time);
     return 0;

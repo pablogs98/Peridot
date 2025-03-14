@@ -1,5 +1,5 @@
 use std::ops::Deref;
-use log::debug;
+use log::{debug, info};
 use std::sync::{Arc, Mutex};
 use peridot::token::TokenBucket;
 use wasi_common::snapshots::preview_1::types::{Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta, Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights, Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence};
@@ -8,11 +8,12 @@ use wasi_common::{Error, WasiCtx};
 use wiggle::{GuestMemory, GuestPtr};
 pub struct PeridotTokenCtx {
     inner: WasiCtx,
-    bucket: Arc<Mutex<TokenBucket>>,
+    bucket: Arc<Mutex<TokenBucket>>
 }
 
 impl PeridotTokenCtx {
     pub fn new(inner: WasiCtx, bucket: Arc<Mutex<TokenBucket>>) -> Self {
+        bucket.lock().unwrap().start_refill_thread();
         Self { inner, bucket }
     }
 
@@ -96,6 +97,32 @@ impl WasiSnapshotPreview1 for PeridotTokenCtx {
     }
 
     async fn fd_pread(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: IovecArray, offset: Filesize) -> Result<Size, Error> {
+        unsafe {
+            if fd.inner() > 2 {
+
+                let mut bytes_to_read = 0;
+
+                for i in 0..iovs.len() {
+                    let iov = iovs.get(i).unwrap();
+                    let iovec = mem.read(iov)?;
+
+                    let buf_len = iovec.buf_len as usize;
+
+                    if buf_len == 0 {
+                        continue;
+                    }
+
+                    bytes_to_read += buf_len as i32;
+                }
+                let handle;
+                {
+                    let mut token_bucket = self.bucket.lock().unwrap();
+                    handle = token_bucket.consume(bytes_to_read as u64);
+                }
+                handle.join().expect("TODO: panic message");
+                debug!("Tokens consumed in fd_pread: {}", bytes_to_read);
+            }
+        }
         WasiSnapshotPreview1::fd_pread(&mut self.inner, mem, fd, iovs, offset).await
     }
 
@@ -108,28 +135,62 @@ impl WasiSnapshotPreview1 for PeridotTokenCtx {
     }
 
     async fn fd_pwrite(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: CiovecArray, offset: Filesize) -> Result<Size, Error> {
+        unsafe {
+            if fd.inner() > 2 {
+                let mut bytes_to_write = 0;
+
+                for i in 0..iovs.len() {
+                    let iov = iovs.get(i).unwrap();
+                    let ciovec = mem.read(iov)?;
+
+                    let buf_len = ciovec.buf_len as usize;
+
+                    if buf_len == 0 {
+                        continue;
+                    }
+
+                    bytes_to_write += buf_len as i32;
+                }
+                let handle;
+                {
+                    let mut token_bucket = self.bucket.lock().unwrap();
+                    handle = token_bucket.consume(bytes_to_write as u64);
+                }
+                handle.join().expect("TODO: panic message");
+
+                debug!("Tokens consumed in fd_pwrite: {}", bytes_to_write);
+            }
+        }
         WasiSnapshotPreview1::fd_pwrite(&mut self.inner, mem, fd, iovs, offset).await
     }
 
     async fn fd_read(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: IovecArray) -> Result<Size, Error> {
-        let mut bytes_to_read = 0;
+        unsafe {
+            if fd.inner() > 2 {
 
-        for i in 0..iovs.len() {
-            let iov = iovs.get(i).unwrap(); // Convierte Option en Result
-            let iovec = mem.read(iov)?; // Lee el Iovec desde memoria
+                let mut bytes_to_read = 0;
 
-            let buf_len = iovec.buf_len as usize;
+                for i in 0..iovs.len() {
+                    let iov = iovs.get(i).unwrap();
+                    let iovec = mem.read(iov)?;
 
-            if buf_len == 0 {
-                continue;
+                    let buf_len = iovec.buf_len as usize;
+
+                    if buf_len == 0 {
+                        continue;
+                    }
+
+                    bytes_to_read += buf_len as i32;
+                }
+
+                let handle;
+                {
+                    let mut token_bucket = self.bucket.lock().unwrap();
+                    handle = token_bucket.consume(bytes_to_read as u64);
+                }
+                handle.join().expect("Error in fd_read");
             }
-
-            bytes_to_read += buf_len as i32;
         }
-
-        self.bucket.lock().unwrap().consume(bytes_to_read as u64);
-
-        debug!("Tokens consumed in fd_read: {}", bytes_to_read);
 
         WasiSnapshotPreview1::fd_read(&mut self.inner, mem, fd, iovs).await
     }
@@ -155,24 +216,31 @@ impl WasiSnapshotPreview1 for PeridotTokenCtx {
     }
 
     async fn fd_write(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: CiovecArray) -> Result<Size, Error> {
-        let mut bytes_to_write = 0;
+        unsafe {
+            if fd.inner() > 2 {
+                let mut bytes_to_write = 0;
 
-        for i in 0..iovs.len() {
-            let iov = iovs.get(i).unwrap(); // Convierte Option en Result
-            let ciovec = mem.read(iov)?; // Lee el Ciovec desde memoria
+                for i in 0..iovs.len() {
+                    let iov = iovs.get(i).unwrap();
+                    let ciovec = mem.read(iov)?;
 
-            let buf_len = ciovec.buf_len as usize;
+                    let buf_len = ciovec.buf_len as usize;
 
-            if buf_len == 0 {
-                continue;
+                    if buf_len == 0 {
+                        continue;
+                    }
+
+                    bytes_to_write += buf_len as i32;
+                }
+                let handle;
+                {
+                    let mut token_bucket = self.bucket.lock().unwrap();
+                    handle = token_bucket.consume(bytes_to_write as u64);
+                }
+                handle.join().expect("TODO: panic message");
+                debug!("Tokens consumed in fd_write: {}", bytes_to_write);
             }
-
-            bytes_to_write += buf_len as i32;
         }
-
-        self.bucket.lock().unwrap().consume(bytes_to_write as u64);
-        println!("Tokens consumed in fd_write: {}", bytes_to_write);
-
         WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await
     }
 

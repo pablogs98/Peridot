@@ -38,9 +38,11 @@ int main() {
     sqlite3 *db = NULL;
     sqlite3_stmt *stmt = NULL;
 
+    printf("Opening DB...\n");
+
     int rc = sqlite3_open("/home/malvarez/Documents/WASM/peridot/wasm/sqlite/TPC-H-30.db", &db);
     if (rc != SQLITE_OK) {
-        printf("Unable to load database %s\n", sqlite3_errmsg(db));
+        printf("Error: %s\n", sqlite3_errmsg(db));
         return 1;
     }
 
@@ -48,7 +50,7 @@ int main() {
     //sqlite3_exec(db, "PRAGMA temp_store = FILE;", 0, 0, 0);
     //sqlite3_exec(db, "PRAGMA synchronous = FULL;", 0, 0, 0);
 
-    for (int i = 1; i <= 22; i++) {
+    for (int i = 1; i <= 3; i++) {
         char filename[200];
         sprintf(filename, "/home/malvarez/Documents/WASM/peridot/wasm/sqlite/queries/%d.sql", i);
 

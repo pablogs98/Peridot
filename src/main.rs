@@ -1,4 +1,4 @@
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use nix::sys::wait::waitpid;
 use nix::sys::wait::{WaitPidFlag, WaitStatus};
 use nix::unistd::{fork, ForkResult};
@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{env, fs, process, thread};
+use std::path::Path;
 use wasi_common::sync::{Dir, WasiCtxBuilder};
 use wasmtime::*;
 
@@ -34,23 +35,29 @@ struct Args {
     log_level: String,
 }
 
-fn run_module(module_path: &str, args: &[String]) -> Result<()> {
+fn run_module(module_path: &str, args: &[String], i: usize, overseer_address: &Option<String>, demand: f64) -> Result<()> {
     // Configure engine and linker
     let engine = Engine::default();
     let mut linker = Linker::new(&engine);
     let end_thread = Arc::new(AtomicBool::new(false));
 
+    info!("Args {:?}", args);
+
     // Set up WASI
     let wasi = WasiCtxBuilder::new()
         .inherit_stdio()
-        .preopened_dir(Dir::from_std_file(fs::File::open(module_path)?), ".")?
+        .preopened_dir(Dir::from_std_file(
+            fs::File::open(Path::new(module_path).parent().unwrap())?), Path::new(module_path).parent().unwrap())?
         .args(args)?
         .build();
 
-    let token_bucket = Arc::new(Mutex::new(TokenBucket::new(0, 500000000, 1)));
+    let token_bucket = Arc::new(Mutex::new(TokenBucket::new(10000, 10000, 1)));
     let peridot_ctx =
         peridot_custom_ctx::token_ctx::PeridotTokenCtx::new(wasi, token_bucket.clone());
-    peridot_custom_ctx::clock_ctx::add_to_linker(&mut linker, |cx| cx)?;
+    peridot_custom_ctx::token_ctx::add_to_linker(&mut linker, |cx| cx)?;
+
+    //let peridot_ctx = peridot_custom_ctx::clock_ctx::PeridotClockCtx::new(wasi);
+    //peridot_custom_ctx::clock_ctx::add_to_linker(&mut linker, |cx| cx)?;
     let mut store = Store::new(&engine, peridot_ctx);
 
     linker.allow_shadowing(true);
@@ -61,10 +68,22 @@ fn run_module(module_path: &str, args: &[String]) -> Result<()> {
 
     // Run the module
     let handle = start_update_rate_thread(
-        token_bucket.clone(),
+        token_bucket,
         end_thread.clone(),
         format!("/tmp/{}_pipe", process::id()),
     );
+
+    info!("Sleeping for {} seconds", 30 * i);
+    thread::sleep(Duration::from_secs(30 * i as u64));
+
+    match overseer_address {
+        Some(overseer_address) => {
+            let mut client = OverseerGrpcClient::new(overseer_address);
+            client.register_module(process::id(), demand)?;
+        }
+        None => (),
+    };
+
     linker
         .get_default(&mut store, "")?
         .typed::<(), ()>(&store)?
@@ -89,6 +108,7 @@ fn start_update_rate_thread(
                 Ok(_) => {
                     let received_value = f64::from_le_bytes(buffer);
                     {
+                        debug!("Received new rate: {}", received_value);
                         let mut token_bucket = token_bucket.lock().unwrap();
                         token_bucket.set_max_capacity(received_value as u64);
                     }
@@ -110,7 +130,10 @@ fn communicate_updates(updated_bandwidth: &HashMap<u32, f64>, pipes: &HashMap<u3
     for (pid, demand) in updated_bandwidth {
         let mut stream = pipes.get(&pid).unwrap();
         let bytes = demand.to_le_bytes();
-        stream.write_all(&bytes).unwrap();
+        match stream.write(&bytes) {
+            Ok(_) => (),
+            Err(e) => warn!("Error writing to pipe: {}", e)
+        };
     }
 }
 
@@ -144,11 +167,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         client = Some(OverseerGrpcClient::new(address));
     }
 
+    // sort config by 'priority' key
+    let mut config: Vec<_> = config.into_iter().collect();
+    config.sort_by(|a, b| a.1.peridot_config.get("priority").unwrap().partial_cmp(b.1.peridot_config.get("priority").unwrap()).unwrap());
+
     // todo: what happens if the parent process is killed? Use UNIX process groups and signal handling
     for (module_path, module_config) in config.into_iter() {
         match unsafe { fork() } {
             Ok(ForkResult::Child) => {
-                if let Err(e) = run_module(&module_path, &module_config.args) {
+                if let Err(e) = run_module(&module_path, &module_config.args, children.len(),overseer_address, *module_config.peridot_config.get("demand").unwrap(),) {
                     eprintln!("Error running module \"{}\": {}", &module_path, e);
                     process::exit(1);
                 }
@@ -156,10 +183,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Ok(ForkResult::Parent { child }) => {
                 if client.is_some() {
-                    client.as_mut().unwrap().register_module(
-                        child.as_raw() as u32,
-                        *module_config.peridot_config.get("demand").unwrap(),
-                    )?;
                     // wait until /tmp/{pid}_pipe is created
                     while !fs::metadata(format!("/tmp/{}_pipe", child.as_raw())).is_ok() { thread::sleep(Duration::from_millis(100)); }
                     pipes.insert(

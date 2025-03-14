@@ -1,5 +1,7 @@
 use std::ops::Deref;
+use std::process::{Command, Stdio};
 use std::time::Duration;
+use log::info;
 use wasi_common::snapshots::preview_1::types::{Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta, Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights, Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence};
 use wasi_common::snapshots::preview_1::wasi_snapshot_preview1::WasiSnapshotPreview1;
 use wasi_common::{Error, ErrorExt, WasiCtx};
@@ -8,13 +10,31 @@ use wiggle::{GuestMemory, GuestPtr};
 pub struct PeridotClockCtx {
     inner: WasiCtx,
     clock: Duration,
+    logs: Vec<String>,
 }
 
 impl PeridotClockCtx {
     pub fn new(inner: WasiCtx) -> Self {
-        Self { inner, clock: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap() }
+        Self { inner, clock: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap(), logs: Vec::new() }
     }
 
+    pub fn drop_cache(&mut self) {
+        let echo_process = Command::new("sudo")
+            .arg("echo")
+            .arg("3")
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Failed to start echo process");
+
+        let mut tee_process = Command::new("sudo")
+            .arg("tee")
+            .arg("/proc/sys/vm/drop_caches")
+            .stdin(echo_process.stdout.unwrap()) // Pasamos la salida de echo como entrada para tee
+            .spawn()
+            .expect("Failed to start tee process");
+
+        let _ = tee_process.wait().expect("Failed to wait for tee process");
+    }
     pub fn get_inner(&self) -> &WasiCtx {
         &self.inner
     }
@@ -29,6 +49,18 @@ impl PeridotClockCtx {
 
     fn update_clock(&mut self) {
         self.clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+    }
+
+    pub fn add_log(&mut self, log: String) {
+        self.logs.push(log);
+        if self.logs.len() % 100 >= 99 {
+            info!("Writing logs to file");
+            self.to_file("logs_default.txt").unwrap();
+        }
+    }
+
+    pub fn to_file(&self, path: &str) -> std::io::Result<()> {
+        std::fs::write(path, self.logs.join("\n"))
     }
 }
 
@@ -54,9 +86,31 @@ impl WasiSnapshotPreview1 for PeridotClockCtx {
         WasiSnapshotPreview1::clock_res_get(&mut self.inner, mem, id).await
     }
 
-    async fn clock_time_get(&mut self, _mem: &mut GuestMemory<'_>, _id: Clockid, _precision: Timestamp) -> Result<Timestamp, Error> {
-        //WasiSnapshotPreview1::clock_time_get(&mut self.inner, mem, id, precision).await?;
-        self.elapsed().try_into().map_err(|_| Error::io())
+    async fn clock_time_get(&mut self, mem: &mut GuestMemory<'_>, id: Clockid, precision: Timestamp) -> Result<Timestamp, Error> {
+        self.drop_cache();
+        let start_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+        match id {
+            Clockid::Realtime => {
+                let now = self.elapsed();
+                let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+                self.add_log(format!("clock_time_get,{}", end_clock.as_nanos() - start_clock.as_nanos()));
+                Ok(Timestamp::from(now as u64))
+            }
+            Clockid::Monotonic => {
+                let now = self.elapsed();
+                let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+                self.add_log(format!("clock_time_get,{}", end_clock.as_nanos() - start_clock.as_nanos()));
+                Ok(Timestamp::from(now as u64))
+            }
+            Clockid::ProcessCputimeId | Clockid::ThreadCputimeId => {
+                Err(Error::badf().context("process and thread clocks are not supported"))
+            }
+        }
+        /*let res = WasiSnapshotPreview1::clock_time_get(&mut self.inner, mem, id, precision).await;
+        let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+        self.add_log(format!("clock_time_get,{}", end_clock.as_nanos() - start_clock.as_nanos()));
+        res
+        */
     }
 
     async fn fd_advise(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, offset: Filesize, len: Filesize, advice: Advice) -> Result<(), Error> {
@@ -72,8 +126,12 @@ impl WasiSnapshotPreview1 for PeridotClockCtx {
     }
 
     async fn fd_datasync(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
+        self.drop_cache();
+        let start_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
         let res = WasiSnapshotPreview1::fd_datasync(&mut self.inner, mem, fd).await;
         self.update_clock();
+        let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+        self.add_log(format!("fd_datasync,{}", end_clock.as_nanos() - start_clock.as_nanos()));
         res
     }
 
@@ -102,8 +160,12 @@ impl WasiSnapshotPreview1 for PeridotClockCtx {
     }
 
     async fn fd_pread(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: IovecArray, offset: Filesize) -> Result<Size, Error> {
+        self.drop_cache();
+        let start_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
         let res = WasiSnapshotPreview1::fd_pread(&mut self.inner, mem, fd, iovs, offset).await;
         self.update_clock();
+        let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+        self.add_log(format!("fd_pread,{}", end_clock.as_nanos() - start_clock.as_nanos()));
         res
     }
 
@@ -116,14 +178,22 @@ impl WasiSnapshotPreview1 for PeridotClockCtx {
     }
 
     async fn fd_pwrite(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: CiovecArray, offset: Filesize) -> Result<Size, Error> {
+        self.drop_cache();
+        let start_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
         let res= WasiSnapshotPreview1::fd_pwrite(&mut self.inner, mem, fd, iovs, offset).await;
         self.update_clock();
+        let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+        self.add_log(format!("fd_pwrite,{}", end_clock.as_nanos() - start_clock.as_nanos()));
         res
     }
 
     async fn fd_read(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: IovecArray) -> Result<Size, Error> {
+        self.drop_cache();
+        let start_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
         let res = WasiSnapshotPreview1::fd_read(&mut self.inner, mem, fd, iovs).await;
         self.update_clock();
+        let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+        self.add_log(format!("fd_read,{}", end_clock.as_nanos() - start_clock.as_nanos()));
         res
     }
 
@@ -148,9 +218,16 @@ impl WasiSnapshotPreview1 for PeridotClockCtx {
     }
 
     async fn fd_write(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: CiovecArray) -> Result<Size, Error> {
-        println!("fd_write");
+        self.drop_cache();
+        let start_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
         let res = WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await;
         self.update_clock();
+        let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+        unsafe {
+            if fd.inner() > 3 {
+                self.add_log(format!("fd_write,{}", end_clock.as_nanos() - start_clock.as_nanos()));
+            }
+        }
         res
     }
 
