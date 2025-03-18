@@ -1,7 +1,6 @@
 use geds_rs::{GEDSFile, GEDS};
 use log::{error, info};
 use std::collections::BTreeMap;
-use std::fmt;
 use std::ops::{Deref, DerefMut};
 use wasi_common::snapshots::preview_1::types;
 use wasi_common::snapshots::preview_1::types::{
@@ -278,7 +277,7 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         iovs: IovecArray,
         offset: Filesize,
     ) -> Result<Size, Error> {
-        if self.geds_descriptors.contains_key(&fd.into()) {
+        if self.geds_descriptors.contains_key(fd.into()) {
             let geds_file = self.geds_descriptors.get(fd.into()).unwrap();
             let mut buf: Vec<u8> = vec![0; iovs.len() as usize];
             let len = buf.len();
