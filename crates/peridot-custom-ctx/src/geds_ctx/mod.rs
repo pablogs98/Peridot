@@ -481,10 +481,14 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
             }
 
             return match result {
-                Ok(file) => self
-                    .geds_descriptors
-                    .push(file)
-                    .map_err(|_| types::Errno::Noent.into()),
+                Ok(file) => {
+                    let fd = self
+                        .geds_descriptors
+                        .push(file)
+                        .map_err(|_| types::Errno::Noent.into()).unwrap();
+                    Ok(fd.into())
+                }
+                ,
                 Err(e) => {
                     error!("Could not open GEDSFile: {}", e);
                     Err(types::Errno::Noent.into())
