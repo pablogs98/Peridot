@@ -485,7 +485,7 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
                     let fd = self
                         .geds_descriptors
                         .push(file)
-                        .map_err(|_| types::Errno::Noent.into()).unwrap();
+                        .unwrap();
                     Ok(fd.into())
                 }
                 ,
