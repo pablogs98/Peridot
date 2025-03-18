@@ -116,7 +116,7 @@ impl WasiSnapshotPreview1 for PeridotTokenCtx {
                 }
                 let handle;
                 {
-                    let mut token_bucket = self.bucket.lock().unwrap();
+                    let token_bucket = self.bucket.lock().unwrap();
                     handle = token_bucket.consume(bytes_to_read as u64);
                 }
                 handle.join().expect("TODO: panic message");
@@ -153,7 +153,7 @@ impl WasiSnapshotPreview1 for PeridotTokenCtx {
                 }
                 let handle;
                 {
-                    let mut token_bucket = self.bucket.lock().unwrap();
+                    let token_bucket = self.bucket.lock().unwrap();
                     handle = token_bucket.consume(bytes_to_write as u64);
                 }
                 handle.join().expect("TODO: panic message");
@@ -185,7 +185,7 @@ impl WasiSnapshotPreview1 for PeridotTokenCtx {
 
                 let handle;
                 {
-                    let mut token_bucket = self.bucket.lock().unwrap();
+                    let token_bucket = self.bucket.lock().unwrap();
                     handle = token_bucket.consume(bytes_to_read as u64);
                 }
                 handle.join().expect("Error in fd_read");
@@ -234,7 +234,7 @@ impl WasiSnapshotPreview1 for PeridotTokenCtx {
                 }
                 let handle;
                 {
-                    let mut token_bucket = self.bucket.lock().unwrap();
+                    let token_bucket = self.bucket.lock().unwrap();
                     handle = token_bucket.consume(bytes_to_write as u64);
                 }
                 handle.join().expect("TODO: panic message");
