@@ -277,13 +277,11 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         iovs: IovecArray,
         offset: Filesize,
     ) -> Result<Size, Error> {
-        if self.geds_descriptors.contains_key(fd.into()) {
-            let geds_file = self.geds_descriptors.get(fd.into()).unwrap();
+        if self.geds_descriptors.contains_key(&fd) {
+            let geds_file = self.geds_descriptors.get(&fd).unwrap();
             let mut buf: Vec<u8> = vec![0; iovs.len() as usize];
             let len = buf.len();
-            return match geds_file
-                .geds_file
-                .read(&mut buf, offset.try_into().unwrap(), len)
+            return match geds_file.read(&mut buf, offset.try_into().unwrap(), len)
             {
                 Ok(size) => Ok(u32::try_from(size)?),
                 Err(e) => {
@@ -325,7 +323,7 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
             let buf = first_non_empty_ciovec(mem, iovs)?;
             let buf = mem.to_vec(buf)?;
 
-            return match geds_file.geds_file.write(&buf, 0, buf.len()) {
+            return match geds_file.write(&buf, 0, buf.len()) {
                 Ok(()) => Ok(u32::try_from(buf.len())?),
                 Err(e) => {
                     println!("Error fd_write: {}", e);
