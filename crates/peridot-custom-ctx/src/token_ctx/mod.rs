@@ -1,5 +1,5 @@
 use std::ops::Deref;
-use log::{debug, info};
+use log::{debug};
 use std::sync::{Arc, Mutex};
 use peridot::token::TokenBucket;
 use wasi_common::snapshots::preview_1::types::{Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta, Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights, Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence};

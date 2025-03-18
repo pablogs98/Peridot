@@ -86,7 +86,7 @@ impl WasiSnapshotPreview1 for PeridotClockCtx {
         WasiSnapshotPreview1::clock_res_get(&mut self.inner, mem, id).await
     }
 
-    async fn clock_time_get(&mut self, mem: &mut GuestMemory<'_>, id: Clockid, precision: Timestamp) -> Result<Timestamp, Error> {
+    async fn clock_time_get(&mut self, _mem: &mut GuestMemory<'_>, id: Clockid, _precision: Timestamp) -> Result<Timestamp, Error> {
         self.drop_cache();
         let start_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
         match id {
