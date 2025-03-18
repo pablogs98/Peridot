@@ -14,13 +14,7 @@ use wasi_common::{Error, WasiCtx};
 use wiggle::{GuestError, GuestMemory, GuestPtr};
 
 
-impl fmt::Debug for GEDSFile {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "GEDSFile")
-    }
-}
-
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct GEDSDescriptors {
     used: BTreeMap<u32, GEDSFile>,
     free: Vec<u32>,
