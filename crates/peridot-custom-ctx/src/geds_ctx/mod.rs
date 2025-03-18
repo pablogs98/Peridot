@@ -1,33 +1,54 @@
-use std::collections::BTreeMap;
-use std::ops::Deref;
-use std::time::Duration;
+use geds_rs::{GEDSFile, GEDS};
 use log::{error, info};
-use wasi_common::snapshots::preview_1::types::{Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta, Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights, Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence};
-use wasi_common::snapshots::preview_1::wasi_snapshot_preview1::WasiSnapshotPreview1;
-use wasi_common::{Error, ErrorExt, WasiCtx};
+use std::collections::BTreeMap;
+use std::ops::{Deref, DerefMut};
 use wasi_common::snapshots::preview_1::types;
-use wasmtime::component::Resource;
+use wasi_common::snapshots::preview_1::types::{
+    Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta,
+    Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights,
+    Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence,
+};
+use wasi_common::snapshots::preview_1::wasi_snapshot_preview1::WasiSnapshotPreview1;
+use wasi_common::{Error, WasiCtx};
 use wiggle::{GuestError, GuestMemory, GuestPtr};
-use geds_rs::{GEDS, GEDSFile};
+
+#[derive(Debug)]
+struct GEDSFileWrapper {
+    geds_file: GEDSFile,
+}
+
+impl Deref for GEDSFileWrapper {
+    type Target = GEDSFile;
+
+    fn deref(&self) -> &Self::Target {
+        &self.geds_file
+    }
+}
 
 #[derive(Debug, Default)]
 struct GEDSDescriptors {
-    used: BTreeMap<u32, GEDSFile>,
+    used: BTreeMap<u32, GEDSFileWrapper>,
     free: Vec<u32>,
 }
 
 impl Deref for GEDSDescriptors {
-    type Target = BTreeMap<u32, GEDSFile>;
+    type Target = BTreeMap<u32, GEDSFileWrapper>;
 
     fn deref(&self) -> &Self::Target {
         &self.used
     }
 }
 
+impl DerefMut for GEDSDescriptors {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.used
+    }
+}
+
 impl GEDSDescriptors {
-    fn new() -> Result<Self, types::Error> {
+    fn new() -> GEDSDescriptors {
         let descriptors = Self::default();
-        Ok(descriptors)
+        descriptors
     }
 
     /// Returns next descriptor number, which was never assigned
@@ -38,7 +59,7 @@ impl GEDSDescriptors {
                     return Ok(fd);
                 }
                 if self.len() == u32::MAX as usize {
-                    return Err(types::Errno::Loop.into());
+                    return Err(());
                 }
                 // TODO: Optimize
                 Ok((8192..u32::MAX)
@@ -69,7 +90,6 @@ impl GEDSDescriptors {
         assert!(self.insert(fd, desc).is_none());
         Ok(fd)
     }
-
 }
 
 pub struct PeridotGEDSCtx {
@@ -102,7 +122,11 @@ impl PeridotGEDSCtx {
             }
             opt = Some(geds);
         }
-        Self { inner, geds }
+        Self {
+            inner,
+            geds: Some(geds),
+            geds_descriptors: GEDSDescriptors::new(),
+        }
     }
 
     pub fn get_inner(&self) -> &WasiCtx {
@@ -116,7 +140,12 @@ impl PeridotGEDSCtx {
 
 #[async_trait::async_trait]
 impl WasiSnapshotPreview1 for PeridotGEDSCtx {
-    async fn args_get(&mut self, mem: &mut GuestMemory<'_>, argv: GuestPtr<GuestPtr<u8>>, argv_buf: GuestPtr<u8>) -> Result<(), Error> {
+    async fn args_get(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        argv: GuestPtr<GuestPtr<u8>>,
+        argv_buf: GuestPtr<u8>,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::args_get(&mut self.inner, mem, argv, argv_buf).await
     }
 
@@ -124,32 +153,62 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         WasiSnapshotPreview1::args_sizes_get(&mut self.inner, mem).await
     }
 
-    async fn environ_get(&mut self, mem: &mut GuestMemory<'_>, environ: GuestPtr<GuestPtr<u8>>, environ_buf: GuestPtr<u8>) -> Result<(), Error> {
+    async fn environ_get(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        environ: GuestPtr<GuestPtr<u8>>,
+        environ_buf: GuestPtr<u8>,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::environ_get(&mut self.inner, mem, environ, environ_buf).await
     }
 
-    async fn environ_sizes_get(&mut self, mem: &mut GuestMemory<'_>) -> Result<(Size, Size), Error> {
+    async fn environ_sizes_get(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+    ) -> Result<(Size, Size), Error> {
         WasiSnapshotPreview1::environ_sizes_get(&mut self.inner, mem).await
     }
 
-    async fn clock_res_get(&mut self, mem: &mut GuestMemory<'_>, id: Clockid) -> Result<Timestamp, Error> {
+    async fn clock_res_get(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        id: Clockid,
+    ) -> Result<Timestamp, Error> {
         WasiSnapshotPreview1::clock_res_get(&mut self.inner, mem, id).await
     }
 
-    async fn clock_time_get(&mut self, mem: &mut GuestMemory<'_>, id: Clockid, precision: Timestamp) -> Result<Timestamp, Error> {
+    async fn clock_time_get(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        id: Clockid,
+        precision: Timestamp,
+    ) -> Result<Timestamp, Error> {
         WasiSnapshotPreview1::clock_time_get(&mut self.inner, mem, id, precision).await
     }
 
-    async fn fd_advise(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, offset: Filesize, len: Filesize, advice: Advice) -> Result<(), Error> {
+    async fn fd_advise(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        offset: Filesize,
+        len: Filesize,
+        advice: Advice,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::fd_advise(&mut self.inner, mem, fd, offset, len, advice).await
     }
 
-    async fn fd_allocate(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, offset: Filesize, len: Filesize) -> Result<(), Error> {
+    async fn fd_allocate(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        offset: Filesize,
+        len: Filesize,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::fd_allocate(&mut self.inner, mem, fd, offset, len).await
     }
 
     async fn fd_close(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
-        if self.geds_descriptors.contains_key(fd.into()) {
+        if self.geds_descriptors.contains_key(&fd.into()) {
             self.geds_descriptors.remove(fd.into());
             return Ok(());
         }
@@ -157,7 +216,7 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
     }
 
     async fn fd_datasync(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
-        if self.geds_descriptors.contains_key(fd.into()) {
+        if self.geds_descriptors.contains_key(&fd.into()) {
             self.geds.as_ref().unwrap().relocate(true);
             return Ok(());
         }
@@ -168,28 +227,69 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         WasiSnapshotPreview1::fd_fdstat_get(&mut self.inner, mem, fd).await
     }
 
-    async fn fd_fdstat_set_flags(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, flags: Fdflags) -> Result<(), Error> {
+    async fn fd_fdstat_set_flags(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        flags: Fdflags,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::fd_fdstat_set_flags(&mut self.inner, mem, fd, flags).await
     }
 
-    async fn fd_fdstat_set_rights(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, fs_rights_base: Rights, fs_rights_inheriting: Rights) -> Result<(), Error> {
-        WasiSnapshotPreview1::fd_fdstat_set_rights(&mut self.inner, mem, fd, fs_rights_base, fs_rights_inheriting).await
+    async fn fd_fdstat_set_rights(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        fs_rights_base: Rights,
+        fs_rights_inheriting: Rights,
+    ) -> Result<(), Error> {
+        WasiSnapshotPreview1::fd_fdstat_set_rights(
+            &mut self.inner,
+            mem,
+            fd,
+            fs_rights_base,
+            fs_rights_inheriting,
+        )
+        .await
     }
 
-    async fn fd_filestat_get(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<Filestat, Error> {
+    async fn fd_filestat_get(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+    ) -> Result<Filestat, Error> {
         WasiSnapshotPreview1::fd_filestat_get(&mut self.inner, mem, fd).await
     }
 
-    async fn fd_filestat_set_size(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, size: Filesize) -> Result<(), Error> {
+    async fn fd_filestat_set_size(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        size: Filesize,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::fd_filestat_set_size(&mut self.inner, mem, fd, size).await
     }
 
-    async fn fd_filestat_set_times(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, atim: Timestamp, mtim: Timestamp, fst_flags: Fstflags) -> Result<(), Error> {
-        WasiSnapshotPreview1::fd_filestat_set_times(&mut self.inner, mem, fd, atim, mtim, fst_flags).await
+    async fn fd_filestat_set_times(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        atim: Timestamp,
+        mtim: Timestamp,
+        fst_flags: Fstflags,
+    ) -> Result<(), Error> {
+        WasiSnapshotPreview1::fd_filestat_set_times(&mut self.inner, mem, fd, atim, mtim, fst_flags)
+            .await
     }
 
-    async fn fd_pread(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: IovecArray, offset: Filesize) -> Result<Size, Error> {
-        if self.geds_descriptors.contains_key(fd.into()) {
+    async fn fd_pread(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        iovs: IovecArray,
+        offset: Filesize,
+    ) -> Result<Size, Error> {
+        if self.geds_descriptors.contains_key(&fd.into()) {
             let geds_file = self.geds_descriptors.get(fd.into()).unwrap();
             let mut buf: Vec<u8> = vec![0; iovs.len() as usize];
             let len = buf.len();
@@ -207,16 +307,32 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         WasiSnapshotPreview1::fd_pread(&mut self.inner, mem, fd, iovs, offset).await
     }
 
-    async fn fd_prestat_get(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<Prestat, Error> {
+    async fn fd_prestat_get(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+    ) -> Result<Prestat, Error> {
         WasiSnapshotPreview1::fd_prestat_get(&mut self.inner, mem, fd).await
     }
 
-    async fn fd_prestat_dir_name(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, path: GuestPtr<u8>, path_len: Size) -> Result<(), Error> {
+    async fn fd_prestat_dir_name(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        path: GuestPtr<u8>,
+        path_len: Size,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::fd_prestat_dir_name(&mut self.inner, mem, fd, path, path_len).await
     }
 
-    async fn fd_pwrite(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: CiovecArray, offset: Filesize) -> Result<Size, Error> {
-        if self.geds_descriptors.contains_key(fd.into()) {
+    async fn fd_pwrite(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        iovs: CiovecArray,
+        offset: Filesize,
+    ) -> Result<Size, Error> {
+        if self.geds_descriptors.contains_key(&fd.into()) {
             let geds_file = self.geds_descriptors.get(fd.into()).unwrap();
             let buf = first_non_empty_ciovec(mem, iovs)?;
             let buf = mem.to_vec(buf)?;
@@ -232,19 +348,42 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         WasiSnapshotPreview1::fd_pwrite(&mut self.inner, mem, fd, iovs, offset).await
     }
 
-    async fn fd_read(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: IovecArray) -> Result<Size, Error> {
+    async fn fd_read(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        iovs: IovecArray,
+    ) -> Result<Size, Error> {
         WasiSnapshotPreview1::fd_read(&mut self.inner, mem, fd, iovs).await
     }
 
-    async fn fd_readdir(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, buf: GuestPtr<u8>, buf_len: Size, cookie: Dircookie) -> Result<Size, Error> {
+    async fn fd_readdir(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        buf: GuestPtr<u8>,
+        buf_len: Size,
+        cookie: Dircookie,
+    ) -> Result<Size, Error> {
         WasiSnapshotPreview1::fd_readdir(&mut self.inner, mem, fd, buf, buf_len, cookie).await
     }
 
-    async fn fd_renumber(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, to: Fd) -> Result<(), Error> {
+    async fn fd_renumber(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        to: Fd,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::fd_renumber(&mut self.inner, mem, fd, to).await
     }
 
-    async fn fd_seek(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, offset: Filedelta, whence: Whence) -> Result<Filesize, Error> {
+    async fn fd_seek(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        offset: Filedelta,
+        whence: Whence,
+    ) -> Result<Filesize, Error> {
         WasiSnapshotPreview1::fd_seek(&mut self.inner, mem, fd, offset, whence).await
     }
 
@@ -256,30 +395,92 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         WasiSnapshotPreview1::fd_tell(&mut self.inner, mem, fd).await
     }
 
-    async fn fd_write(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: CiovecArray) -> Result<Size, Error> {
-        if !self.geds_descriptors.contains_key(fd.into()) {
+    async fn fd_write(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        iovs: CiovecArray,
+    ) -> Result<Size, Error> {
+        if !self.geds_descriptors.contains_key(&fd.into()) {
             return Err(types::Errno::Badf.into());
         }
         WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await
     }
 
-    async fn path_create_directory(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, path: GuestPtr<str>) -> Result<(), Error> {
+    async fn path_create_directory(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        path: GuestPtr<str>,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::path_create_directory(&mut self.inner, mem, fd, path).await
     }
 
-    async fn path_filestat_get(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, flags: Lookupflags, path: GuestPtr<str>) -> Result<Filestat, Error> {
+    async fn path_filestat_get(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        flags: Lookupflags,
+        path: GuestPtr<str>,
+    ) -> Result<Filestat, Error> {
         WasiSnapshotPreview1::path_filestat_get(&mut self.inner, mem, fd, flags, path).await
     }
 
-    async fn path_filestat_set_times(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, flags: Lookupflags, path: GuestPtr<str>, atim: Timestamp, mtim: Timestamp, fst_flags: Fstflags) -> Result<(), Error> {
-        WasiSnapshotPreview1::path_filestat_set_times(&mut self.inner, mem, fd, flags, path, atim, mtim, fst_flags).await
+    async fn path_filestat_set_times(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        flags: Lookupflags,
+        path: GuestPtr<str>,
+        atim: Timestamp,
+        mtim: Timestamp,
+        fst_flags: Fstflags,
+    ) -> Result<(), Error> {
+        WasiSnapshotPreview1::path_filestat_set_times(
+            &mut self.inner,
+            mem,
+            fd,
+            flags,
+            path,
+            atim,
+            mtim,
+            fst_flags,
+        )
+        .await
     }
 
-    async fn path_link(&mut self, mem: &mut GuestMemory<'_>, old_fd: Fd, old_flags: Lookupflags, old_path: GuestPtr<str>, new_fd: Fd, new_path: GuestPtr<str>) -> Result<(), Error> {
-        WasiSnapshotPreview1::path_link(&mut self.inner, mem, old_fd, old_flags, old_path, new_fd, new_path).await
+    async fn path_link(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        old_fd: Fd,
+        old_flags: Lookupflags,
+        old_path: GuestPtr<str>,
+        new_fd: Fd,
+        new_path: GuestPtr<str>,
+    ) -> Result<(), Error> {
+        WasiSnapshotPreview1::path_link(
+            &mut self.inner,
+            mem,
+            old_fd,
+            old_flags,
+            old_path,
+            new_fd,
+            new_path,
+        )
+        .await
     }
 
-    async fn path_open(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, dirflags: Lookupflags, path: GuestPtr<str>, oflags: Oflags, fs_rights_base: Rights, fs_rights_inheriting: Rights, fdflags: Fdflags) -> Result<Fd, Error> {
+    async fn path_open(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        dirflags: Lookupflags,
+        path: GuestPtr<str>,
+        oflags: Oflags,
+        fs_rights_base: Rights,
+        fs_rights_inheriting: Rights,
+        fdflags: Fdflags,
+    ) -> Result<Fd, Error> {
         let str_path = read_string(mem, path)?;
         if str_path.contains("geds://") {
             let result;
@@ -288,60 +489,108 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
             let key = path.split("/").skip(1).collect::<Vec<&str>>().join("/");
 
             if oflags.contains(Oflags::CREAT) {
-                result = self.geds.as_ref().unwrap().create(bucket, key, true);
+                result = self.geds.as_ref().unwrap().create(bucket, &key, true);
             } else {
-                result = self.geds.as_ref().unwrap().open(bucket, key);
+                result = self.geds.as_ref().unwrap().open(bucket, &key);
             }
 
-            match result {
-                Ok(file) => return self.geds_descriptors.push(file).map_err(|_| types::Errno::Noent.into()),
+            return match result {
+                Ok(file) => self
+                    .geds_descriptors
+                    .push(file)
+                    .map_err(|_| types::Errno::Noent.into()),
                 Err(e) => {
                     error!("Could not open GEDSFile: {}", e);
-                    return Err(types::Errno::Noent.into());
+                    Err(types::Errno::Noent.into())
                 }
-            }
-
-            let file = result.unwrap();
-            self.geds_descriptors.push(file).into()
+            };
         }
-        WasiSnapshotPreview1::path_open(&mut self.inner, mem, fd, dirflags, path, oflags, fs_rights_base, fs_rights_inheriting, fdflags).await
+        WasiSnapshotPreview1::path_open(
+            &mut self.inner,
+            mem,
+            fd,
+            dirflags,
+            path,
+            oflags,
+            fs_rights_base,
+            fs_rights_inheriting,
+            fdflags,
+        )
+        .await
     }
 
-    async fn path_readlink(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, path: GuestPtr<str>, buf: GuestPtr<u8>, buf_len: Size) -> Result<Size, Error> {
+    async fn path_readlink(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        path: GuestPtr<str>,
+        buf: GuestPtr<u8>,
+        buf_len: Size,
+    ) -> Result<Size, Error> {
         WasiSnapshotPreview1::path_readlink(&mut self.inner, mem, fd, path, buf, buf_len).await
     }
 
-    async fn path_remove_directory(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, path: GuestPtr<str>) -> Result<(), Error> {
+    async fn path_remove_directory(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        path: GuestPtr<str>,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::path_remove_directory(&mut self.inner, mem, fd, path).await
     }
 
-    async fn path_rename(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, old_path: GuestPtr<str>, new_fd: Fd, new_path: GuestPtr<str>) -> Result<(), Error> {
-        WasiSnapshotPreview1::path_rename(&mut self.inner, mem, fd, old_path, new_fd, new_path).await
+    async fn path_rename(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        old_path: GuestPtr<str>,
+        new_fd: Fd,
+        new_path: GuestPtr<str>,
+    ) -> Result<(), Error> {
+        WasiSnapshotPreview1::path_rename(&mut self.inner, mem, fd, old_path, new_fd, new_path)
+            .await
     }
 
-    async fn path_symlink(&mut self, mem: &mut GuestMemory<'_>, old_path: GuestPtr<str>, fd: Fd, new_path: GuestPtr<str>) -> Result<(), Error> {
+    async fn path_symlink(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        old_path: GuestPtr<str>,
+        fd: Fd,
+        new_path: GuestPtr<str>,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::path_symlink(&mut self.inner, mem, old_path, fd, new_path).await
     }
 
-    async fn path_unlink_file(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, path: GuestPtr<str>) -> Result<(), Error> {
+    async fn path_unlink_file(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        path: GuestPtr<str>,
+    ) -> Result<(), Error> {
         let str_path = read_string(mem, path)?;
         if str_path.contains("geds://") {
             let path = str_path.replace("geds://", "");
             let bucket = path.split("/").next().unwrap();
             let key = path.split("/").skip(1).collect::<Vec<&str>>().join("/");
-            let result = self.geds.as_ref().unwrap().delete_object(bucket, key);
+            let result = self.geds.as_ref().unwrap().delete_object(bucket, &key);
             return match result {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     error!("Could not delete GEDSFile: {}", e);
                     Err(types::Errno::Noent.into())
                 }
-            }
+            };
         }
         WasiSnapshotPreview1::path_unlink_file(&mut self.inner, mem, fd, path).await
     }
 
-    async fn poll_oneoff(&mut self, mem: &mut GuestMemory<'_>, in_: GuestPtr<Subscription>, out: GuestPtr<Event>, nsubscriptions: Size) -> Result<Size, Error> {
+    async fn poll_oneoff(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        in_: GuestPtr<Subscription>,
+        out: GuestPtr<Event>,
+        nsubscriptions: Size,
+    ) -> Result<Size, Error> {
         WasiSnapshotPreview1::poll_oneoff(&mut self.inner, mem, in_, out, nsubscriptions).await
     }
 
@@ -357,23 +606,50 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         WasiSnapshotPreview1::sched_yield(&mut self.inner, mem).await
     }
 
-    async fn random_get(&mut self, mem: &mut GuestMemory<'_>, buf: GuestPtr<u8>, buf_len: Size) -> Result<(), Error> {
+    async fn random_get(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        buf: GuestPtr<u8>,
+        buf_len: Size,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::random_get(&mut self.inner, mem, buf, buf_len).await
     }
 
-    async fn sock_accept(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, flags: Fdflags) -> Result<Fd, Error> {
+    async fn sock_accept(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        flags: Fdflags,
+    ) -> Result<Fd, Error> {
         WasiSnapshotPreview1::sock_accept(&mut self.inner, mem, fd, flags).await
     }
 
-    async fn sock_recv(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, ri_data: IovecArray, ri_flags: Riflags) -> Result<(Size, Roflags), Error> {
+    async fn sock_recv(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        ri_data: IovecArray,
+        ri_flags: Riflags,
+    ) -> Result<(Size, Roflags), Error> {
         WasiSnapshotPreview1::sock_recv(&mut self.inner, mem, fd, ri_data, ri_flags).await
     }
 
-    async fn sock_send(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, si_data: CiovecArray, si_flags: Siflags) -> Result<Size, Error> {
+    async fn sock_send(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        si_data: CiovecArray,
+        si_flags: Siflags,
+    ) -> Result<Size, Error> {
         WasiSnapshotPreview1::sock_send(&mut self.inner, mem, fd, si_data, si_flags).await
     }
 
-    async fn sock_shutdown(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, how: Sdflags) -> Result<(), Error> {
+    async fn sock_shutdown(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        how: Sdflags,
+    ) -> Result<(), Error> {
         WasiSnapshotPreview1::sock_shutdown(&mut self.inner, mem, fd, how).await
     }
 }
@@ -385,7 +661,7 @@ fn read_string<'a>(memory: &'a GuestMemory<'_>, ptr: GuestPtr<str>) -> Result<St
 fn first_non_empty_ciovec(
     memory: &GuestMemory<'_>,
     ciovs: types::CiovecArray,
-) -> Result<GuestPtr<[u8]>, ()> {
+) -> Result<GuestPtr<[u8]>, GuestError> {
     for iov in ciovs.iter() {
         let iov = memory.read(iov?)?;
         if iov.buf_len == 0 {
