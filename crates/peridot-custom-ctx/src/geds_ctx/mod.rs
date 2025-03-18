@@ -196,15 +196,15 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
     }
 
     async fn fd_close(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
-        if self.geds_descriptors.contains_key(&fd.into()) {
-            self.geds_descriptors.remove(fd.into());
+        if self.geds_descriptors.contains_key(&u32::from(fd)) {
+            self.geds_descriptors.remove(fd);
             return Ok(());
         }
         WasiSnapshotPreview1::fd_close(&mut self.inner, mem, fd).await
     }
 
     async fn fd_datasync(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
-        if self.geds_descriptors.contains_key(&fd.into()) {
+        if self.geds_descriptors.contains_key(&u32::from(fd)) {
             self.geds.as_ref().unwrap().relocate(true);
             return Ok(());
         }
@@ -277,8 +277,8 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         iovs: IovecArray,
         offset: Filesize,
     ) -> Result<Size, Error> {
-        if self.geds_descriptors.contains_key(&fd) {
-            let geds_file = self.geds_descriptors.get(&fd).unwrap();
+        if self.geds_descriptors.contains_key(&u32::from(fd)) {
+            let geds_file = self.geds_descriptors.get(&u32::from(fd)).unwrap();
             let mut buf: Vec<u8> = vec![0; iovs.len() as usize];
             let len = buf.len();
             return match geds_file.read(&mut buf, offset.try_into().unwrap(), len)
@@ -318,8 +318,8 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         iovs: CiovecArray,
         offset: Filesize,
     ) -> Result<Size, Error> {
-        if self.geds_descriptors.contains_key(&fd.into()) {
-            let geds_file = self.geds_descriptors.get(fd.into()).unwrap();
+        if self.geds_descriptors.contains_key(&u32::from(fd)) {
+            let geds_file = self.geds_descriptors.get(&u32::from(fd)).unwrap();
             let buf = first_non_empty_ciovec(mem, iovs)?;
             let buf = mem.to_vec(buf)?;
 
@@ -387,7 +387,7 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         fd: Fd,
         iovs: CiovecArray,
     ) -> Result<Size, Error> {
-        if !self.geds_descriptors.contains_key(&fd.into()) {
+        if !self.geds_descriptors.contains_key(&u32::from(fd)) {
             return Err(types::Errno::Badf.into());
         }
         WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await
