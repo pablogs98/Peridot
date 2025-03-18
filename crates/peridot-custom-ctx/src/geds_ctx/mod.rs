@@ -124,7 +124,7 @@ impl PeridotGEDSCtx {
         }
         Self {
             inner,
-            geds: Some(geds),
+            geds: opt,
             geds_descriptors: GEDSDescriptors::new(),
         }
     }
