@@ -12,27 +12,21 @@ use wasi_common::snapshots::preview_1::wasi_snapshot_preview1::WasiSnapshotPrevi
 use wasi_common::{Error, WasiCtx};
 use wiggle::{GuestError, GuestMemory, GuestPtr};
 
-#[derive(Debug)]
-struct GEDSFileWrapper {
-    geds_file: GEDSFile,
-}
 
-impl Deref for GEDSFileWrapper {
-    type Target = GEDSFile;
-
-    fn deref(&self) -> &Self::Target {
-        &self.geds_file
+impl std::fmt::Debug for GEDSFile {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "GEDSFile")
     }
 }
 
 #[derive(Debug, Default)]
 struct GEDSDescriptors {
-    used: BTreeMap<u32, GEDSFileWrapper>,
+    used: BTreeMap<u32, GEDSFile>,
     free: Vec<u32>,
 }
 
 impl Deref for GEDSDescriptors {
-    type Target = BTreeMap<u32, GEDSFileWrapper>;
+    type Target = BTreeMap<u32, GEDSFile>;
 
     fn deref(&self) -> &Self::Target {
         &self.used
