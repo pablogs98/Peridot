@@ -1,6 +1,7 @@
 use geds_rs::{GEDSFile, GEDS};
 use log::{error, info};
 use std::collections::BTreeMap;
+use std::fmt;
 use std::ops::{Deref, DerefMut};
 use wasi_common::snapshots::preview_1::types;
 use wasi_common::snapshots::preview_1::types::{
@@ -13,7 +14,7 @@ use wasi_common::{Error, WasiCtx};
 use wiggle::{GuestError, GuestMemory, GuestPtr};
 
 
-impl std::fmt::Debug for GEDSFile {
+impl fmt::Debug for GEDSFile {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "GEDSFile")
     }
