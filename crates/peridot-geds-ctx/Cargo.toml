@@ -1,14 +1,14 @@
 [package]
 name = "peridot-geds-ctx"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
 
 [dependencies]
-peridot = { path = "../peridot" }
-wiggle = "29.0.1"
-anyhow = "1.0.95"
-async-trait = "0.1.85"
-wasi-common = "29.0.1"
-wasmtime = "29.0.1"
-log = "0.4.26"
-geds_rs = { path = "/usr/local/rust"}
+wiggle = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+wasi-common = { workspace = true }
+wasmtime = { workspace = true }
+log = { workspace = true }
+geds_rs = { path = "/usr/local/rust" }

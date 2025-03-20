@@ -71,14 +71,20 @@ fn run_module(
     {
         let end_thread = Arc::new(AtomicBool::new(false));
         let token_bucket = Arc::new(Mutex::new(TokenBucket::new(10000, 10000, 1)));
-        let peridot_ctx = peridot_token_ctx::PeridotTokenCtx::new(wasi, token_bucket.clone());
+        let wasi_ctx = peridot_token_ctx::PeridotTokenCtx::new(wasi, token_bucket.clone());
     }
     #[cfg(feature = "peridot-geds-ctx")]
-    let peridot_ctx = peridot_geds_ctx::PeridotGEDSCtx::new(wasi);
+    let wasi_ctx = peridot_geds_ctx::PeridotGEDSCtx::new(wasi);
     #[cfg(feature = "peridot-clock-ctx")]
-    let peridot_ctx = peridot_clock_ctx::PeridotClockCtx::new(wasi);
+    let wasi_ctx = peridot_clock_ctx::PeridotClockCtx::new(wasi);
+    #[cfg(all(
+        not(feature = "peridot-token-ctx"),
+        not(feature = "peridot-geds-ctx"),
+        not(feature = "peridot-clock-ctx")
+    ))]
+    let wasi_ctx = wasi;
 
-    let mut store = Store::new(&engine, peridot_ctx);
+    let mut store = Store::new(&engine, wasi_ctx);
 
     linker.allow_shadowing(true);
 
