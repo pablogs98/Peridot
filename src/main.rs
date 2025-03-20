@@ -1,21 +1,30 @@
-use log::{debug, error, info, warn};
+use clap::Parser;
+use log::{debug, error, info};
+#[cfg(feature = "peridot-token-ctx")]
+use log::warn;
 use nix::sys::wait::waitpid;
 use nix::sys::wait::{WaitPidFlag, WaitStatus};
 use nix::unistd::{fork, ForkResult};
-use peridot::token::TokenBucket;
 use peridot_overseer_grpc::client::OverseerGrpcClient;
-use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+
+use std::path::Path;
 use std::time::{Duration, Instant};
 use std::{env, fs, process, thread};
-use std::path::Path;
 use wasi_common::sync::{Dir, WasiCtxBuilder};
 use wasmtime::*;
 
-use clap::Parser;
+#[cfg(feature = "peridot-token-ctx")]
+use std::collections::HashMap;
+#[cfg(feature = "peridot-token-ctx")]
+use std::io::{Read, Write};
+#[cfg(feature = "peridot-token-ctx")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "peridot-token-ctx")]
+use std::sync::{Arc, Mutex};
+#[cfg(feature = "peridot-token-ctx")]
+use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(feature = "peridot-token-ctx")]
+use peridot::token::TokenBucket;
 
 /// Peridot - Transparent Integration of new logic in legacy Wasm modules
 #[derive(Parser, Debug)]
@@ -35,29 +44,40 @@ struct Args {
     log_level: String,
 }
 
-fn run_module(module_path: &str, args: &[String], i: usize, overseer_address: &Option<String>, demand: f64) -> Result<()> {
+fn run_module(
+    module_path: &str,
+    args: &[String],
+    _i: usize,
+    _overseer_address: &Option<String>,
+    _demand: f64,
+) -> Result<()> {
     // Configure engine and linker
     let engine = Engine::default();
     let mut linker = Linker::new(&engine);
-    let end_thread = Arc::new(AtomicBool::new(false));
 
     info!("Args {:?}", args);
 
     // Set up WASI
     let wasi = WasiCtxBuilder::new()
         .inherit_stdio()
-        .preopened_dir(Dir::from_std_file(
-            fs::File::open(Path::new(module_path).parent().unwrap())?), Path::new(module_path).parent().unwrap())?
+        .preopened_dir(
+            Dir::from_std_file(fs::File::open(Path::new(module_path).parent().unwrap())?),
+            Path::new(module_path).parent().unwrap(),
+        )?
         .args(args)?
         .build();
 
-    let token_bucket = Arc::new(Mutex::new(TokenBucket::new(10000, 10000, 1)));
-    let peridot_ctx =
-        peridot_custom_ctx::token_ctx::PeridotTokenCtx::new(wasi, token_bucket.clone());
-    peridot_custom_ctx::token_ctx::add_to_linker(&mut linker, |cx| cx)?;
+    #[cfg(feature = "peridot-token-ctx")]
+    {
+        let end_thread = Arc::new(AtomicBool::new(false));
+        let token_bucket = Arc::new(Mutex::new(TokenBucket::new(10000, 10000, 1)));
+        let peridot_ctx = peridot_token_ctx::PeridotTokenCtx::new(wasi, token_bucket.clone());
+    }
+    #[cfg(feature = "peridot-geds-ctx")]
+    let peridot_ctx = peridot_geds_ctx::PeridotGEDSCtx::new(wasi);
+    #[cfg(feature = "peridot-clock-ctx")]
+    let peridot_ctx = peridot_clock_ctx::PeridotClockCtx::new(wasi);
 
-    //let peridot_ctx = peridot_custom_ctx::clock_ctx::PeridotClockCtx::new(wasi);
-    //peridot_custom_ctx::clock_ctx::add_to_linker(&mut linker, |cx| cx)?;
     let mut store = Store::new(&engine, peridot_ctx);
 
     linker.allow_shadowing(true);
@@ -67,33 +87,40 @@ fn run_module(module_path: &str, args: &[String], i: usize, overseer_address: &O
     linker.module(&mut store, "", &module)?;
 
     // Run the module
-    let handle = start_update_rate_thread(
-        token_bucket,
-        end_thread.clone(),
-        format!("/tmp/{}_pipe", process::id()),
-    );
+    #[cfg(feature = "peridot-token-ctx")]
+    {
+        let handle = start_update_rate_thread(
+            token_bucket,
+            end_thread.clone(),
+            format!("/tmp/{}_pipe", process::id()),
+        );
 
-    info!("Sleeping for {} seconds", 30 * i);
-    thread::sleep(Duration::from_secs(30 * i as u64));
+        info!("Sleeping for {} seconds", 30 * _i);
+        thread::sleep(Duration::from_secs(30 * _i as u64));
 
-    match overseer_address {
-        Some(overseer_address) => {
-            let mut client = OverseerGrpcClient::new(overseer_address);
-            client.register_module(process::id(), demand)?;
-        }
-        None => (),
-    };
+        match _overseer_address {
+            Some(overseer_address) => {
+                let mut client = OverseerGrpcClient::new(overseer_address);
+                client.register_module(process::id(), _demand)?;
+            }
+            None => (),
+        };
+    }
 
     linker
         .get_default(&mut store, "")?
         .typed::<(), ()>(&store)?
         .call(&mut store, ())?;
 
-    end_thread.store(true, Ordering::Relaxed);
-    handle.join().unwrap();
+    #[cfg(feature = "peridot-token-ctx")]
+    {
+        end_thread.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+    }
     Ok(())
 }
 
+#[cfg(feature = "peridot-token-ctx")]
 fn start_update_rate_thread(
     token_bucket: Arc<Mutex<TokenBucket>>,
     end_thread: Arc<AtomicBool>,
@@ -126,13 +153,14 @@ fn start_update_rate_thread(
     })
 }
 
+#[cfg(feature = "peridot-token-ctx")]
 fn communicate_updates(updated_bandwidth: &HashMap<u32, f64>, pipes: &HashMap<u32, UnixStream>) {
     for (pid, demand) in updated_bandwidth {
         let mut stream = pipes.get(&pid).unwrap();
         let bytes = demand.to_le_bytes();
         match stream.write(&bytes) {
             Ok(_) => (),
-            Err(e) => warn!("Error writing to pipe: {}", e)
+            Err(e) => warn!("Error writing to pipe: {}", e),
         };
     }
 }
@@ -161,6 +189,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut children = vec![];
+    #[cfg(feature = "peridot-token-ctx")]
     let mut pipes: HashMap<u32, UnixStream> = HashMap::new();
     let mut client = None;
     if let Some(ref address) = overseer_address {
@@ -169,22 +198,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // sort config by 'priority' key
     let mut config: Vec<_> = config.into_iter().collect();
-    config.sort_by(|a, b| a.1.peridot_config.get("priority").unwrap().partial_cmp(b.1.peridot_config.get("priority").unwrap()).unwrap());
+    config.sort_by(|a, b| {
+        a.1.peridot_config
+            .get("priority")
+            .unwrap()
+            .partial_cmp(b.1.peridot_config.get("priority").unwrap())
+            .unwrap()
+    });
 
     // todo: what happens if the parent process is killed? Use UNIX process groups and signal handling
     for (module_path, module_config) in config.into_iter() {
         match unsafe { fork() } {
             Ok(ForkResult::Child) => {
-                if let Err(e) = run_module(&module_path, &module_config.args, children.len(),overseer_address, *module_config.peridot_config.get("demand").unwrap(),) {
+                if let Err(e) = run_module(
+                    &module_path,
+                    &module_config.args,
+                    children.len(),
+                    overseer_address,
+                    *module_config.peridot_config.get("demand").unwrap(),
+                ) {
                     eprintln!("Error running module \"{}\": {}", &module_path, e);
                     process::exit(1);
                 }
                 process::exit(0);
             }
             Ok(ForkResult::Parent { child }) => {
+                #[cfg(feature = "peridot-token-ctx")]
                 if client.is_some() {
                     // wait until /tmp/{pid}_pipe is created
-                    while !fs::metadata(format!("/tmp/{}_pipe", child.as_raw())).is_ok() { thread::sleep(Duration::from_millis(100)); }
+                    while !fs::metadata(format!("/tmp/{}_pipe", child.as_raw())).is_ok() {
+                        thread::sleep(Duration::from_millis(100));
+                    }
+
                     pipes.insert(
                         child.as_raw() as u32,
                         UnixStream::connect(format!("/tmp/{}_pipe", child.as_raw()))?,
@@ -204,6 +249,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while !children.is_empty() {
         let mut to_remove = vec![];
+        #[cfg(feature = "peridot-token-ctx")]
         if let Some(ref mut client) = client {
             let updated_bandwidth = client
                 .update_max_bandwidth(children.iter().map(|pid| pid.as_raw() as u32).collect());

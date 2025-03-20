@@ -1,5 +1,5 @@
 [package]
-name = "peridot-custom-ctx"
+name = "peridot-token-ctx"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,4 +11,3 @@ async-trait = "0.1.85"
 wasi-common = "29.0.1"
 wasmtime = "29.0.1"
 log = "0.4.26"
-geds_rs = { path = "/usr/local/rust" }

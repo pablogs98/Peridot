@@ -7,7 +7,9 @@ edition = "2021"
 wasmtime = "29.0.1"
 wasi-common = "29.0.1"
 peridot = { path = "crates/peridot" }
-peridot-custom-ctx = { path = "crates/peridot-custom-ctx" }
+peridot-token-ctx = { path = "crates/peridot-token-ctx", optional = true }
+peridot-geds-ctx = { path = "crates/peridot-geds-ctx", optional = true }
+peridot-clock-ctx = { path = "crates/peridot-clock-ctx", optional = true }
 nix = { version = "0.29.0", features = ["process"] }
 peridot-overseer-grpc = { path = "crates/peridot-overseer-grpc" }
 env_logger = "0.11.6"

@@ -1363,14 +1363,29 @@ dependencies = [
  "log",
  "nix",
  "peridot",
- "peridot-custom-ctx",
+ "peridot-clock-ctx",
+ "peridot-geds-ctx",
  "peridot-overseer-grpc",
+ "peridot-token-ctx",
  "wasi-common",
  "wasmtime",
 ]
 
 [[package]]
-name = "peridot-custom-ctx"
+name = "peridot-clock-ctx"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "log",
+ "peridot",
+ "wasi-common",
+ "wasmtime",
+ "wiggle",
+]
+
+[[package]]
+name = "peridot-geds-ctx"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1396,6 +1411,19 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tower 0.5.2",
+]
+
+[[package]]
+name = "peridot-token-ctx"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "log",
+ "peridot",
+ "wasi-common",
+ "wasmtime",
+ "wiggle",
 ]
 
 [[package]]
