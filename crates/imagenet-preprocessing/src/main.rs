@@ -13,9 +13,9 @@ fn main() {
     let use_geds = args[1].parse::<bool>().unwrap();
 
     let image_paths = [
-        "resources/tabby.png",
-        "resources/banana.jpg",
-        "resources/cougar.jpg",
+        "/resources/tabby.png",
+        "/resources/banana.jpg",
+        "/resources/cougar.jpg",
     ];
     let image_paths = image_paths
         .iter()
