@@ -74,7 +74,10 @@ fn run_module(
         let wasi_ctx = peridot_token_ctx::PeridotTokenCtx::new(wasi, token_bucket.clone());
     }
     #[cfg(feature = "peridot-geds-ctx")]
-    let wasi_ctx = peridot_geds_ctx::PeridotGEDSCtx::new(wasi);
+    {
+        let wasi_ctx = peridot_geds_ctx::PeridotGEDSCtx::new(wasi);
+        peridot_geds_ctx::add_to_linker(&mut linker, |cx| cx);
+    }
     #[cfg(feature = "peridot-clock-ctx")]
     let wasi_ctx = peridot_clock_ctx::PeridotClockCtx::new(wasi);
     #[cfg(all(
@@ -112,6 +115,7 @@ fn run_module(
             None => (),
         };
     }
+
 
     linker
         .get_default(&mut store, "")?

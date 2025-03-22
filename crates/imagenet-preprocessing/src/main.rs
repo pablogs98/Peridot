@@ -5,24 +5,33 @@ use std::io::Write;
 use std::path::PathBuf;
 
 fn main() {
+    // get time
     let args = args().collect::<Vec<String>>();
-    if args.len() != 2 {
-        println!("Usage: imagenet-preprocessing <use_geds:true|false>");
+    if args.len() != 3 {
+        println!("Usage: imagenet-preprocessing <use_geds:true|false> <num_images>");
         return;
     }
     let use_geds = args[1].parse::<bool>().unwrap();
+    let num_images = args[2].parse::<usize>().unwrap();
 
     let image_paths = [
-        "/resources/tabby.png",
-        "/resources/banana.jpg",
-        "/resources/cougar.jpg",
+        "/tabby.png",
+        "/banana.jpg",
+        "/cougar.jpg",
     ];
     let image_paths = image_paths
         .iter()
         .map(|p| PathBuf::from(p))
         .collect::<Vec<PathBuf>>();
-    let images = read_images(&image_paths).unwrap();
+    let start = std::time::Instant::now();
+    let images = read_images(&image_paths, num_images).unwrap();
+    let elapsed = start.elapsed();
+    println!("Read images in {} ms", elapsed.as_millis());
+    let start = std::time::Instant::now();
     let batch_tensors = preprocess(&images);
+    let elapsed = start.elapsed();
+    println!("Preprocessed images in {} ms", elapsed.as_millis());
+    let start = std::time::Instant::now();
     // Write batch_tensors to files
     for (i, tensor) in batch_tensors.iter().enumerate() {
         let file_name;
@@ -35,6 +44,8 @@ fn main() {
         }
         write_tensor_to_file(&file_name, tensor).unwrap();
     }
+    let elapsed = start.elapsed();
+    println!("Wrote tensors to files in {} ms", elapsed.as_millis());
 }
 
 fn write_tensor_to_file(file_name: &str, tensor: &[u8]) -> std::io::Result<()> {
@@ -43,11 +54,13 @@ fn write_tensor_to_file(file_name: &str, tensor: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-fn read_images(image_paths: &[PathBuf]) -> Result<Vec<Vec<u8>>, ()> {
+fn read_images(image_paths: &[PathBuf], num_images: usize) -> Result<Vec<Vec<u8>>, ()> {
     let mut images = Vec::new();
-    for image_path in image_paths {
-        let image = fs::read(image_path).unwrap();
+    let mut i = 0;
+    while i < num_images {
+        let image = fs::read(&image_paths[i % 3]).unwrap();
         images.push(image);
+        i = i + 1;
     }
     Ok(images)
 }
@@ -68,9 +81,6 @@ fn preprocess(images: &[Vec<u8>]) -> Vec<Vec<u8>> {
 }
 
 fn preprocess_one(image: &[u8], height: u32, width: u32, _mean: &[f32], _std: &[f32]) -> Vec<u8> {
-    println!("Preprocessing image to size {}x{}...", width, height);
-    //Get size of image
-    println!("Image len: {}", image.len());
     let img = image::load_from_memory(&image).unwrap().to_rgb8();
     let resized =
         image::imageops::resize(&img, height, width, ::image::imageops::FilterType::Triangle);
