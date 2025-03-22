@@ -73,6 +73,7 @@ fn run_module(
         let token_bucket = Arc::new(Mutex::new(TokenBucket::new(10000, 10000, 1)));
         let wasi_ctx = peridot_token_ctx::PeridotTokenCtx::new(wasi, token_bucket.clone());
     }
+    let wasi_ctx;
     #[cfg(feature = "peridot-geds-ctx")]
     {
         let wasi_ctx = peridot_geds_ctx::PeridotGEDSCtx::new(wasi);
