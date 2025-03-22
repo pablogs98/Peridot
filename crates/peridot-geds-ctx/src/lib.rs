@@ -110,6 +110,7 @@ impl PeridotGEDSCtx {
             }
             opt = Some(geds);
         }
+        info!("Initialization complete!");
         Self {
             inner,
             geds: opt,

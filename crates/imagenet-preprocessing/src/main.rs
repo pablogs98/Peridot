@@ -11,6 +11,7 @@ fn main() {
         println!("Usage: imagenet-preprocessing <use_geds:true|false> <num_images>");
         return;
     }
+    println!("Starting imagenet-preprocessing");
     let use_geds = args[1].parse::<bool>().unwrap();
     let num_images = args[2].parse::<usize>().unwrap();
 
