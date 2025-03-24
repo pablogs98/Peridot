@@ -1,14 +1,19 @@
 use std::env::args;
 use std::fs;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use log::info;
+use std::ffi::CString;
+use std::os::fd::RawFd;
+use libc::{open, O_CREAT, O_RDWR, O_TRUNC, S_IRUSR, S_IWUSR};
 
 fn main() {
     // get time
     let args = args().collect::<Vec<String>>();
     if args.len() != 3 {
         println!("Usage: imagenet-preprocessing <use_geds:true|false> <num_images>");
+        info!("Usage: imagenet-preprocessing <use_geds:true|false> <num_images>");
         return;
     }
     println!("Starting imagenet-preprocessing");
@@ -16,9 +21,9 @@ fn main() {
     let num_images = args[2].parse::<usize>().unwrap();
 
     let image_paths = [
-        "/tabby.png",
-        "/banana.jpg",
-        "/cougar.jpg",
+        "/home/ubuntu/Peridot/crates/imagenet-preprocessing/resources/tabby.png",
+        "/home/ubuntu/Peridot/crates/imagenet-preprocessing/resources/banana.jpg",
+        "/home/ubuntu/Peridot/crates/imagenet-preprocessing/resources/cougar.jpg",
     ];
     let image_paths = image_paths
         .iter()
@@ -37,7 +42,7 @@ fn main() {
     for (i, tensor) in batch_tensors.iter().enumerate() {
         let file_name;
         if use_geds {
-            file_name = format!("geds://tensor_{}.bin", i);
+            file_name = format!("/home/ubuntu/Peridot/crates/imagenet-preprocessing/geds://geds-default/tensor_{}.bin", i);
             write_tensor_to_file(&file_name, tensor).unwrap();
             continue;
         } else {
@@ -50,10 +55,14 @@ fn main() {
 }
 
 fn write_tensor_to_file(file_name: &str, tensor: &[u8]) -> std::io::Result<()> {
-    let mut file = File::create(file_name)?;
-    file.write_all(tensor)?;
+    println!("Trying to open file {}", file_name);
+    {
+        fs::write(file_name, tensor)?;
+        println!("Opened {}", file_name);
+    }
     Ok(())
 }
+
 
 fn read_images(image_paths: &[PathBuf], num_images: usize) -> Result<Vec<Vec<u8>>, ()> {
     let mut images = Vec::new();

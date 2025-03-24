@@ -197,15 +197,19 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
     }
 
     async fn fd_close(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
+        println!("Closing file");
         if self.geds_descriptors.contains_key(&u32::from(fd)) {
+            println!("Closing GEDS file");
             self.geds_descriptors.remove(fd);
-            return Ok(());
+            self.geds.as_ref().unwrap().relocate(true);
+             return Ok(());
         }
         WasiSnapshotPreview1::fd_close(&mut self.inner, mem, fd).await
     }
 
     async fn fd_datasync(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
         if self.geds_descriptors.contains_key(&u32::from(fd)) {
+            println!("Datasyinncccc");
             self.geds.as_ref().unwrap().relocate(true);
             return Ok(());
         }
@@ -388,8 +392,18 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         fd: Fd,
         iovs: CiovecArray,
     ) -> Result<Size, Error> {
-        if !self.geds_descriptors.contains_key(&u32::from(fd)) {
-            return Err(types::Errno::Badf.into());
+        if self.geds_descriptors.contains_key(&u32::from(fd)) {
+            let geds_file = self.geds_descriptors.get(&u32::from(fd)).unwrap();
+            let buf = first_non_empty_ciovec(mem, iovs)?;
+            let buf = mem.to_vec(buf)?;
+
+            return match geds_file.write(&buf, 0, buf.len()) {
+                Ok(()) => Ok(u32::try_from(buf.len())?),
+                Err(e) => {
+                    println!("Error fd_write: {}", e);
+                    Err(types::Errno::Fault.into())
+                }
+            };
         }
         WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await
     }
@@ -469,12 +483,20 @@ impl WasiSnapshotPreview1 for PeridotGEDSCtx {
         fdflags: Fdflags,
     ) -> Result<Fd, Error> {
         let str_path = read_string(mem, path)?;
-        if str_path.contains("geds://") {
-            let result;
-            let path = str_path.replace("geds://", "");
-            let bucket = path.split("/").next().unwrap();
-            let key = path.split("/").skip(1).collect::<Vec<&str>>().join("/");
+        println!("Opening: {}", str_path);
 
+        if let Some(start) = str_path.find("geds://") {
+            let str_path = &str_path[start + 7..]; // Extrae lo que hay después de "geds://"
+            println!("Extracted path: {}", str_path);
+
+            let mut parts = str_path.splitn(2, '/'); // Divide solo en 2 partes (bucket y el resto)
+            let bucket = parts.next().unwrap_or_default();
+            let key = parts.next().unwrap_or_default();
+
+            println!("Bucket: {}", bucket);
+            println!("Key: {}", key);
+
+            let result;
             if oflags.contains(Oflags::CREAT) {
                 result = self.geds.as_ref().unwrap().create(bucket, &key, true);
             } else {

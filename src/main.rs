@@ -45,10 +45,8 @@ fn run_module(
     // Set up WASI
     let wasi = WasiCtxBuilder::new()
         .inherit_stdio()
-        .preopened_dir(
-            Dir::from_std_file(fs::File::open(Path::new(module_path).parent().unwrap())?),
-            Path::new(module_path).parent().unwrap(),
-        )?
+        .preopened_dir(Dir::from_std_file(
+            fs::File::open(Path::new(module_path).parent().unwrap())?), Path::new(module_path).parent().unwrap())?
         .args(args)?
         .build();
 
@@ -58,6 +56,8 @@ fn run_module(
     linker.allow_shadowing(true);
     let module = Module::from_file(&engine, module_path)?;
     linker.module(&mut store, "", &module)?;
+    
+    info!("STARTING MODULE>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<");
     linker
         .get_default(&mut store, "")?
         .typed::<(), ()>(&store)?
@@ -121,7 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 process::exit(0);
             }
             Ok(ForkResult::Parent { child }) => {
-                debug!("Spawned process with PID: {}", child);
+                info!("Spawned process with PID: {}", child);
                 children.push(child);
             }
             Err(e) => {
@@ -137,12 +137,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut to_remove = vec![];
 
         for (index, pid) in children.iter().enumerate() {
+            info!("Waiting");
             match waitpid(Some(*pid), Some(WaitPidFlag::WNOHANG)) {
                 Ok(WaitStatus::Exited(_, status)) => {
+                    info!("End!");
                     if let Some(ref mut client) = client {
                         client.remove_module(pid.as_raw() as u32)?;
                     }
-                    debug!("Process {} exited with status {}", pid, status);
+                    info!("Process {} exited with status {}", pid, status);
                     to_remove.push(index);
                 }
                 Ok(_) => {}
