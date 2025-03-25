@@ -609,7 +609,7 @@ impl Drop for PeridotS3Ctx {
     fn drop(&mut self) {
         self.tokio_runtime.spawn(async {
             for future in &self.futures {
-                future.await.unwrap();
+                *future.await.unwrap();
             }
         });
     }
