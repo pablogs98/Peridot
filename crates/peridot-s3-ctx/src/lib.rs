@@ -607,7 +607,9 @@ impl Deref for PeridotS3Ctx {
 
 impl Drop for PeridotS3Ctx {
     fn drop(&mut self) {
-        tokio::join!(&self.futures);
+        for future in self.futures {
+            self.tokio_runtime.block_on(future).unwrap();
+        }
     }
 }
 
