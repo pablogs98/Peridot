@@ -605,16 +605,6 @@ impl Deref for PeridotS3Ctx {
     }
 }
 
-impl Drop for PeridotS3Ctx {
-    fn drop(&mut self) {
-        self.tokio_runtime.spawn(async {
-            for future in &self.futures {
-                *future.await.unwrap();
-            }
-        });
-    }
-}
-
 #[macro_export]
 macro_rules! define_wasi {
     ($async_mode:tt $($bounds:tt)*) => {
