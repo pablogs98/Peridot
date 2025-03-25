@@ -1,6 +1,7 @@
 use log::{error, info};
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
+use tokio::runtime::Runtime;
 use wasi_common::snapshots::preview_1::types;
 use wasi_common::snapshots::preview_1::types::{
     Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta,
@@ -82,10 +83,12 @@ pub struct PeridotS3Ctx {
     inner: WasiCtx,
     s3: aws_sdk_s3::Client,
     s3_descriptors: S3Descriptors,
+    tokio_runtime: Runtime,
+    futures: Vec<tokio::task::JoinHandle<aws_sdk_s3::output::PutObjectOutput>>,
 }
 impl PeridotS3Ctx {
     pub fn new(inner: WasiCtx) -> Self {
-        let config = tokio::runtime::Runtime::new()
+        let config = Runtime::new()
             .unwrap()
             .block_on(aws_config::load_from_env());
         let client = aws_sdk_s3::Client::new(&config);
@@ -93,6 +96,8 @@ impl PeridotS3Ctx {
             inner,
             s3: client,
             s3_descriptors: S3Descriptors::new(),
+            tokio_runtime: Runtime::new().unwrap(),
+            futures: Vec::new(),
         }
     }
 
@@ -292,12 +297,12 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
             // obtain bucket and key from s3 file:
             let bucket = s3_file.split("/").next().unwrap();
             let key = s3_file.split("/").skip(1).collect::<Vec<&str>>().join("/");
-            self.s3
+            self.futures.push(self.tokio_runtime.spawn(self.s3
                 .put_object()
                 .bucket(bucket)
                 .key(key)
                 .body(body)
-                .send();
+                .send()));
             return Ok(u32::try_from(len)?);
         }
         WasiSnapshotPreview1::fd_pwrite(&mut self.inner, mem, fd, iovs, offset).await
@@ -597,6 +602,12 @@ impl Deref for PeridotS3Ctx {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+impl Drop for PeridotS3Ctx {
+    fn drop(&mut self) {
+        tokio::join!(&self.futures);
     }
 }
 
