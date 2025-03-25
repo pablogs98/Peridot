@@ -84,7 +84,7 @@ pub struct PeridotS3Ctx {
     s3: aws_sdk_s3::Client,
     s3_descriptors: S3Descriptors,
     tokio_runtime: Runtime,
-    futures: Vec<tokio::task::JoinHandle<Result<aws_sdk_s3::operation::put_object::PutObjectOutput, S3ExampleError>>>
+    futures: Vec<tokio::task::JoinHandle<Result<aws_sdk_s3::operation::put_object::PutObjectOutput,  aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::put_object::PutObjectError>>>>
 }
 impl PeridotS3Ctx {
     pub fn new(inner: WasiCtx) -> Self {
