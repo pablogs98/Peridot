@@ -50,8 +50,8 @@ fn run_module(
         .args(args)?
         .build();
 
-    let wasi_ctx = peridot_geds_ctx::PeridotGEDSCtx::new(wasi);
-    peridot_geds_ctx::add_to_linker(&mut linker, |cx| cx)?;
+    let wasi_ctx = peridot_s3_ctx::PeridotS3Ctx::new(wasi);
+    peridot_s3_ctx::add_to_linker(&mut linker, |cx| cx)?;
     let mut store = Store::new(&engine, wasi_ctx);
     linker.allow_shadowing(true);
     let module = Module::from_file(&engine, module_path)?;

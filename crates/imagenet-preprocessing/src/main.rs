@@ -42,7 +42,7 @@ fn main() {
     for (i, tensor) in batch_tensors.iter().enumerate() {
         let file_name;
         if use_geds {
-            file_name = format!("/home/ubuntu/Peridot/crates/imagenet-preprocessing/geds://geds-default/tensor_{}.bin", i);
+            file_name = format!("/home/ubuntu/Peridot/crates/imagenet-preprocessing/s3://geds-default/tensor_{}.bin", i);
             write_tensor_to_file(&file_name, tensor).unwrap();
             continue;
         } else {

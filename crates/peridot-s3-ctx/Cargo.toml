@@ -1,5 +1,5 @@
 [package]
-name = "peridot-geds-ctx"
+name = "peridot-s3-ctx"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -11,4 +11,6 @@ async-trait = { workspace = true }
 wasi-common = { workspace = true }
 wasmtime = { workspace = true }
 log = { workspace = true }
-# geds_rs = { path = "/usr/local/rust" }
+aws-sdk-s3 = "1.79.0"
+aws-config = { version = "1.1.7", features = ["behavior-version-latest"] }
+tokio = { workspace = true }
