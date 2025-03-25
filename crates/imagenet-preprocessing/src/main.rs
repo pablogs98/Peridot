@@ -34,24 +34,9 @@ fn main() {
     let elapsed = start.elapsed();
     println!("Read images in {} ms", elapsed.as_millis());
     let start = std::time::Instant::now();
-    let batch_tensors = preprocess(&images);
+    let batch_tensors = preprocess(&images, use_geds);
     let elapsed = start.elapsed();
     println!("Preprocessed images in {} ms", elapsed.as_millis());
-    let start = std::time::Instant::now();
-    // Write batch_tensors to files
-    for (i, tensor) in batch_tensors.iter().enumerate() {
-        let file_name;
-        if use_geds {
-            file_name = format!("/home/ubuntu/Peridot/crates/imagenet-preprocessing/s3://geds-default/tensor_{}.bin", i);
-            write_tensor_to_file(&file_name, tensor).unwrap();
-            continue;
-        } else {
-            file_name = format!("tensor_{}.bin", i);
-        }
-        write_tensor_to_file(&file_name, tensor).unwrap();
-    }
-    let elapsed = start.elapsed();
-    println!("Wrote tensors to files in {} ms", elapsed.as_millis());
 }
 
 fn write_tensor_to_file(file_name: &str, tensor: &[u8]) -> std::io::Result<()> {
@@ -75,8 +60,9 @@ fn read_images(image_paths: &[PathBuf], num_images: usize) -> Result<Vec<Vec<u8>
     Ok(images)
 }
 
-fn preprocess(images: &[Vec<u8>]) -> Vec<Vec<u8>> {
+fn preprocess(images: &[Vec<u8>], use_geds: bool) -> Vec<Vec<u8>> {
     let mut processed_images = Vec::new();
+    let mut i = 0;
     for image in images {
         let processed_image = preprocess_one(
             image,
@@ -85,7 +71,16 @@ fn preprocess(images: &[Vec<u8>]) -> Vec<Vec<u8>> {
             &[0.485, 0.456, 0.406],
             &[0.229, 0.224, 0.225],
         );
-        processed_images.push(processed_image);
+        let file_name;
+        if use_geds
+        {
+            file_name = format!("/home/ubuntu/Peridot/crates/imagenet-preprocessing/s3://geds-default/tensor_{}.bin", i);
+        }
+        else {
+            file_name = format!("tensor_{}.bin", i);
+        }
+        write_tensor_to_file(&file_name, &processed_image).unwrap();
+        i = i + 1;
     }
     processed_images
 }
