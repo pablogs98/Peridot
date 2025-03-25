@@ -1,6 +1,5 @@
 use log::{error, info};
 use std::collections::BTreeMap;
-use std::future;
 use std::ops::{Deref, DerefMut};
 use tokio::runtime::Runtime;
 use wasi_common::snapshots::preview_1::types;
@@ -608,7 +607,9 @@ impl Deref for PeridotS3Ctx {
 
 impl Drop for PeridotS3Ctx {
     fn drop(&mut self) {
-        std::future::join_all(self.futures);
+        for future in &self.futures {
+            self.tokio_runtime.block_on(*future).unwrap();
+        }
     }
 }
 
