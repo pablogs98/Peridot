@@ -439,9 +439,9 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
         fdflags: Fdflags,
     ) -> Result<Fd, Error> {
         let str_path = read_string(mem, path)?;
-        if str_path.contains("s3://") {
-            let path = str_path.replace("s3://", "");
-            let fd = self.s3_descriptors.push(path).unwrap();
+        if let Some(start) = str_path.find("s3://") {
+            let str_path = &str_path[start..];
+            let fd = self.s3_descriptors.push(str_path.to_string()).unwrap();
             return Ok(fd.into());
         }
         WasiSnapshotPreview1::path_open(
