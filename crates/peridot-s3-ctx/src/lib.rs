@@ -88,6 +88,7 @@ pub struct PeridotS3Ctx {
 }
 impl PeridotS3Ctx {
     pub fn new(inner: WasiCtx) -> Self {
+        std::env::set_var("WASMTIME_LOG", "wasmtime_wasi=trace");
         let config = Runtime::new()
             .unwrap()
             .block_on(aws_config::load_from_env());
