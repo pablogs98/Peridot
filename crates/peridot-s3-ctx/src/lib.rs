@@ -363,6 +363,7 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
         fd: Fd,
         iovs: CiovecArray,
     ) -> Result<Size, Error> {
+        println!("I shouldn't be here xd");
         WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await
     }
 
