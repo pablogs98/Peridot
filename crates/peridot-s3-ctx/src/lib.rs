@@ -363,7 +363,9 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
         fd: Fd,
         iovs: CiovecArray,
     ) -> Result<Size, Error> {
-        println!("I shouldn't be here xd");
+        if &u32::from(fd) >= &3 {
+            println!("I shouldn't be here xd {}", &u32::from(fd));
+        }
         WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await
     }
 
