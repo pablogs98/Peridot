@@ -288,6 +288,7 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
         iovs: CiovecArray,
         offset: Filesize,
     ) -> Result<Size, Error> {
+        println!("fd_pwritin'");
         if self.s3_descriptors.contains_key(&u32::from(fd)) {
             let s3_file = self.s3_descriptors.get(&u32::from(fd)).unwrap();
             let buf = first_non_empty_ciovec(mem, iovs)?;
@@ -305,6 +306,7 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
                 .send()));
             return Ok(u32::try_from(len)?);
         }
+        println!("Regular fd_pwrite");
         WasiSnapshotPreview1::fd_pwrite(&mut self.inner, mem, fd, iovs, offset).await
     }
 
