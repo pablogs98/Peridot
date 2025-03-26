@@ -442,6 +442,7 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
         if let Some(start) = str_path.find("s3://") {
             let str_path = &str_path[start..];
             let fd = self.s3_descriptors.push(str_path.to_string()).unwrap();
+            println!("Hasta aquí");
             return Ok(fd.into());
         }
         WasiSnapshotPreview1::path_open(
