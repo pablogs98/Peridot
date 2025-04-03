@@ -1,6 +1,5 @@
-# Peridot: transparent extensibility of WebAssembly core modules
+# Peridot: An I/O-Extensible Execution Environment for WebAssembly Containers
 ![Rust workflow](https://github.com/pablogs98/peridot/actions/workflows/rust.yml/badge.svg)
-
 
 ## Requirements
 
