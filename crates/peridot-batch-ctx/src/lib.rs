@@ -93,8 +93,6 @@ impl PeridotBatchCtx {
                 .key(format!("{}.parquet", key))
                 .body(aws_sdk_s3::primitives::ByteStream::from(compressed))
                 .send()));
-
-            //self.flush_pending_uploads();
         }
     }
 }

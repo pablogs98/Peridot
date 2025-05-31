@@ -9,7 +9,7 @@ repository = "https://github.com/pablogs98/Peridot"
 members = [
     "crates/imagenet-preprocessing",
     "crates/peridot-overseer"
-]
+, "crates/tensor_batcher"]
 
 [workspace.package]
 version = "0.1.0"
