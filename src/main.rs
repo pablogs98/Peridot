@@ -31,6 +31,7 @@ struct Args {
 
 fn run_module(
     module_path: &str,
+    batch_size: usize,
     args: &[String],
     _i: usize,
     _overseer_address: &Option<String>,
@@ -50,13 +51,13 @@ fn run_module(
         .args(args)?
         .build();
 
-    let wasi_ctx = peridot_s3_ctx::PeridotS3Ctx::new(wasi);
-    peridot_s3_ctx::add_to_linker(&mut linker, |cx| cx)?;
+    let wasi_ctx = peridot_batch_ctx::PeridotBatchCtx::new(wasi,batch_size, "geds-default");
+    peridot_batch_ctx::add_to_linker(&mut linker, |cx| cx)?;
     let mut store = Store::new(&engine, wasi_ctx);
     linker.allow_shadowing(true);
     let module = Module::from_file(&engine, module_path)?;
     linker.module(&mut store, "", &module)?;
-    
+
     info!("STARTING MODULE>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<");
     linker
         .get_default(&mut store, "")?
@@ -110,6 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(ForkResult::Child) => {
                 if let Err(e) = run_module(
                     &module_path,
+                    *module_config.peridot_config.get("batch_size").unwrap() as usize,
                     &module_config.args,
                     children.len(),
                     overseer_address,

@@ -34,6 +34,7 @@ peridot-token-ctx = { path = "crates/peridot-token-ctx", optional = true }
 peridot-geds-ctx = { path = "crates/peridot-geds-ctx", optional = true }
 peridot-clock-ctx = { path = "crates/peridot-clock-ctx", optional = true }
 peridot-s3-ctx = { path = "crates/peridot-s3-ctx", optional = true }
+peridot-batch-ctx = { path = "crates/peridot-batch-ctx", optional = true }
 
 [workspace.dependencies]
 clap = { version = "4.5.31", features = ["derive"] }
