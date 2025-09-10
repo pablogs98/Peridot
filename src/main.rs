@@ -27,6 +27,9 @@ struct Args {
     /// Overridden by RUST_LOG env var if set.
     #[arg(short, long, default_value = "info")]
     log_level: String,
+    
+    #[arg(required = false, short = 'n')]
+    num_writes: usize,
 }
 
 fn run_module(
@@ -35,29 +38,28 @@ fn run_module(
     _i: usize,
     _overseer_address: &Option<String>,
     _demand: f64,
+    _num_writes: usize,
 ) -> Result<()> {
     // Configure engine and linker
     let engine = Engine::default();
     let mut linker = Linker::new(&engine);
 
-    info!("Args {:?}", args);
-
     // Set up WASI
     let wasi = WasiCtxBuilder::new()
         .inherit_stdio()
         .preopened_dir(Dir::from_std_file(
-            fs::File::open(Path::new(module_path).parent().unwrap())?), Path::new(module_path).parent().unwrap())?
+            fs::File::open(Path::new(module_path).parent().unwrap())?), Path::new("/"))?
         .args(args)?
         .build();
 
-    let wasi_ctx = peridot_s3_ctx::PeridotS3Ctx::new(wasi);
-    peridot_s3_ctx::add_to_linker(&mut linker, |cx| cx)?;
+    
+    let wasi_ctx = peridot_syscall_batching_ctx::PeridotSyscallBatchingCtx::new(wasi, _num_writes);
+    peridot_syscall_batching_ctx::add_to_linker(&mut linker, |cx| cx)?;
     let mut store = Store::new(&engine, wasi_ctx);
     linker.allow_shadowing(true);
     let module = Module::from_file(&engine, module_path)?;
     linker.module(&mut store, "", &module)?;
     
-    info!("STARTING MODULE>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>><<<<");
     linker
         .get_default(&mut store, "")?
         .typed::<(), ()>(&store)?
@@ -114,6 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     children.len(),
                     overseer_address,
                     *module_config.peridot_config.get("demand").unwrap(),
+                    args.num_writes
                 ) {
                     eprintln!("Error running module \"{}\": {}", &module_path, e);
                     process::exit(1);
@@ -137,10 +140,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut to_remove = vec![];
 
         for (index, pid) in children.iter().enumerate() {
-            info!("Waiting");
             match waitpid(Some(*pid), Some(WaitPidFlag::WNOHANG)) {
                 Ok(WaitStatus::Exited(_, status)) => {
-                    info!("End!");
                     if let Some(ref mut client) = client {
                         client.remove_module(pid.as_raw() as u32)?;
                     }

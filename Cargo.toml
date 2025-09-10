@@ -27,19 +27,20 @@ wasi-common = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
-peridot = {workspace = true}
+peridot = { workspace = true }
 nix = { version = "0.29.0", features = ["process"] }
 peridot-overseer-grpc = { path = "crates/peridot-overseer-grpc" }
 peridot-token-ctx = { path = "crates/peridot-token-ctx", optional = true }
 peridot-geds-ctx = { path = "crates/peridot-geds-ctx", optional = true }
 peridot-clock-ctx = { path = "crates/peridot-clock-ctx", optional = true }
 peridot-s3-ctx = { path = "crates/peridot-s3-ctx", optional = true }
+peridot-syscall-batching-ctx = { path = "crates/peridot-syscall-batching-ctx", optional = true }
 
 [workspace.dependencies]
 clap = { version = "4.5.31", features = ["derive"] }
 log = "0.4.26"
 env_logger = "0.11.6"
-wasi-common = "29.0.1"
+wasi-common = { path = "crates/wasi-common-29.0.1" }
 wasmtime = "29.0.1"
 tokio = { version = "1", features = ["full"] }
 peridot = { path = "crates/peridot" }
