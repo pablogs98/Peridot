@@ -21,9 +21,9 @@ fn main() {
     let num_images = args[2].parse::<usize>().unwrap();
 
     let image_paths = [
-        "/home/ubuntu/Peridot/crates/imagenet-preprocessing/resources/tabby.png",
-        "/home/ubuntu/Peridot/crates/imagenet-preprocessing/resources/banana.jpg",
-        "/home/ubuntu/Peridot/crates/imagenet-preprocessing/resources/cougar.jpg",
+        "/home/malvarez/Documents/WASM/peridot/tabby.png",
+        "/home/malvarez/Documents/WASM/peridot/banana.jpg",
+        "/home/malvarez/Documents/WASM/peridot/cougar.jpg",
     ];
     let image_paths = image_paths
         .iter()
@@ -77,7 +77,7 @@ fn preprocess(images: &[Vec<u8>], use_geds: bool) -> Vec<Vec<u8>> {
             file_name = format!("/home/ubuntu/Peridot/crates/imagenet-preprocessing/s3://geds-default/tensor_{}.bin", i);
         }
         else {
-            file_name = format!("tensor_{}.bin", i);
+            file_name = format!("/home/malvarez/Documents/WASM/peridot/tensor_{}.bin", i);
         }
         write_tensor_to_file(&file_name, &processed_image).unwrap();
         i = i + 1;
