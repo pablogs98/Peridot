@@ -1,7 +1,13 @@
 use log::{error, info};
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
+use std::time::Duration;
+use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::operation::put_object::{PutObjectError, PutObjectOutput};
+use aws_sdk_s3::primitives::ByteStream;
 use tokio::runtime::Runtime;
+use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use wasi_common::snapshots::preview_1::types;
 use wasi_common::snapshots::preview_1::types::{
     Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta,
@@ -84,7 +90,8 @@ pub struct PeridotS3Ctx {
     s3: aws_sdk_s3::Client,
     s3_descriptors: S3Descriptors,
     tokio_runtime: Runtime,
-    futures: Vec<tokio::task::JoinHandle<Result<aws_sdk_s3::operation::put_object::PutObjectOutput,  aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::put_object::PutObjectError>>>>
+    futures: Vec<JoinHandle<(Result<PutObjectOutput, SdkError<PutObjectError>>, std::time::Duration, Instant)>>,
+
 }
 impl PeridotS3Ctx {
     pub fn new(inner: WasiCtx) -> Self {
@@ -108,6 +115,29 @@ impl PeridotS3Ctx {
 
     pub fn get_inner_mut(&mut self) -> &mut WasiCtx {
         &mut self.inner
+    }
+}
+
+pub struct TimedJoinHandle {
+    handle: JoinHandle<Result<PutObjectOutput,SdkError<PutObjectError>>>,
+    start: Instant,
+}
+
+impl PeridotS3Ctx {
+    fn spawn_s3_upload(&mut self, bucket: String, key: String, body: ByteStream) {
+        let client = self.s3.clone();
+        let handle = self.tokio_runtime.spawn(async move {
+            let start = Instant::now();
+            let result = client.put_object()
+                .bucket(bucket)
+                .key(key)
+                .body(body)
+                .send()
+                .await;
+            let elapsed = start.elapsed();
+            (result, elapsed, start)
+        });
+        self.futures.push(handle);
     }
 }
 
@@ -299,12 +329,7 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
             // obtain bucket and key from s3 file:
             let bucket = s3_file.split("/").next().unwrap();
             let key = s3_file.split("/").skip(1).collect::<Vec<&str>>().join("/");
-            self.futures.push(self.tokio_runtime.spawn(self.s3
-                .put_object()
-                .bucket(bucket)
-                .key(key)
-                .body(body)
-                .send()));
+            self.spawn_s3_upload(bucket.to_string(), key.to_string(), body);
             return Ok(u32::try_from(len)?);
         }
         println!("Regular fd_pwrite");
@@ -364,8 +389,16 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
         fd: Fd,
         iovs: CiovecArray,
     ) -> Result<Size, Error> {
-        if &u32::from(fd) >= &3 {
-            println!("I shouldn't be here xd {}", &u32::from(fd));
+        if self.s3_descriptors.contains_key(&u32::from(fd)) {
+            let s3_file = self.s3_descriptors.get(&u32::from(fd)).unwrap();
+            let buf = first_non_empty_ciovec(mem, iovs)?;
+            let buf = mem.to_vec(buf)?;
+            let len = buf.len();
+            let body = aws_sdk_s3::primitives::ByteStream::from(buf);
+            let bucket = s3_file.split("//").nth(1).unwrap().split("/").next().unwrap();
+            let key = s3_file.split("/").skip(3).collect::<Vec<&str>>().join("/");
+            self.spawn_s3_upload(bucket.to_string(), key.to_string(), body);
+            return Ok(u32::try_from(len)?);
         }
         WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await
     }
@@ -449,7 +482,6 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
             let str_path = &str_path[start..];
             let fd = self.s3_descriptors.push(str_path.to_string()).unwrap();
             let fd = fd.into();
-            println!("Hasta aquí");
             return Ok(fd);
         }
         WasiSnapshotPreview1::path_open(
@@ -612,6 +644,61 @@ impl Deref for PeridotS3Ctx {
         &self.inner
     }
 }
+
+impl Drop for PeridotS3Ctx {
+    fn drop(&mut self) {
+        if self.futures.is_empty() {
+            return;
+        }
+
+        info!("Waiting for {} pending S3 uploads...", self.futures.len());
+
+        let mut total_elapsed = Duration::ZERO;
+        let mut completed = 0;
+        let mut first_start = None;
+        let mut last_end = None;
+
+        for handle in self.futures.drain(..) {
+            match self.tokio_runtime.block_on(handle) {
+                Ok((Ok(_), elapsed, start)) => {
+                    let end = start + elapsed;
+                    info!("Upload completed in {:.2?}", elapsed);
+
+                    if first_start.is_none() || start < first_start.unwrap() {
+                        first_start = Some(start);
+                    }
+                    if last_end.is_none() || end > last_end.unwrap() {
+                        last_end = Some(end);
+                    }
+
+                    total_elapsed += elapsed;
+                    completed += 1;
+                }
+                Ok((Err(e), _, _)) => {
+                    error!("S3 upload failed: {:?}", e);
+                }
+                Err(join_err) => {
+                    error!("Task join error: {:?}", join_err);
+                }
+            }
+        }
+
+        if completed > 0 {
+            let avg = total_elapsed / completed as u32;
+            info!("Average S3 upload time: {:.2?}", avg);
+
+            if let (Some(start), Some(end)) = (first_start, last_end) {
+                let duration_sec = end.duration_since(start).as_secs_f64();
+                if duration_sec > 0.0 {
+                    let sps = completed as f64 / duration_sec;
+                    info!("Avg. uploads per second: {:.2}", sps);
+                }
+            }
+        }
+    }
+}
+
+
 
 #[macro_export]
 macro_rules! define_wasi {
