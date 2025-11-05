@@ -8,6 +8,7 @@ repository = "https://github.com/pablogs98/Peridot"
 [workspace]
 members = [
     "crates/imagenet-preprocessing",
+    "crates/peridot-counter-ctx",
     "crates/peridot-overseer"
 ]
 
@@ -34,6 +35,7 @@ peridot-token-ctx = { path = "crates/peridot-token-ctx", optional = true }
 peridot-geds-ctx = { path = "crates/peridot-geds-ctx", optional = true }
 peridot-clock-ctx = { path = "crates/peridot-clock-ctx", optional = true }
 peridot-s3-ctx = { path = "crates/peridot-s3-ctx", optional = true }
+peridot-counter-ctx = { path = "crates/peridot-counter-ctx", optional = true }
 
 [workspace.dependencies]
 clap = { version = "4.5.31", features = ["derive"] }
@@ -53,3 +55,4 @@ async-trait = "0.1.85"
 token = ["peridot-token-ctx"]
 geds = ["peridot-geds-ctx"]
 clock = ["peridot-clock-ctx"]
+counter = ["peridot-counter-ctx"]

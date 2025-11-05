@@ -1,5 +1,7 @@
 use clap::Parser;
 use log::{debug, error, info};
+#[cfg(feature = "peridot-token-ctx")]
+use log::warn;
 use nix::sys::wait::waitpid;
 use nix::sys::wait::{WaitPidFlag, WaitStatus};
 use nix::unistd::{fork, ForkResult};
@@ -10,6 +12,19 @@ use std::time::{Duration, Instant};
 use std::{env, fs, process, thread};
 use wasi_common::sync::{Dir, WasiCtxBuilder};
 use wasmtime::*;
+
+#[cfg(feature = "peridot-token-ctx")]
+use std::collections::HashMap;
+#[cfg(feature = "peridot-token-ctx")]
+use std::io::{Read, Write};
+#[cfg(feature = "peridot-token-ctx")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "peridot-token-ctx")]
+use std::sync::{Arc, Mutex};
+#[cfg(feature = "peridot-token-ctx")]
+use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(feature = "peridot-token-ctx")]
+use peridot::token::TokenBucket;
 
 /// Peridot - Transparent Integration of new logic in legacy Wasm modules
 #[derive(Parser, Debug)]
@@ -40,31 +55,116 @@ fn run_module(
     let engine = Engine::default();
     let mut linker = Linker::new(&engine);
 
+    info!("Args {:?}", args);
+
     // Set up WASI
     let wasi = WasiCtxBuilder::new()
         .inherit_stdio()
-        .preopened_dir(Dir::from_std_file(
-            fs::File::open(Path::new(module_path).parent().unwrap())?), Path::new("/"))?
+        .preopened_dir(
+            Dir::from_std_file(fs::File::open(Path::new(module_path).parent().unwrap())?),
+            Path::new(module_path).parent().unwrap(),
+        )?
         .args(args)?
         .build();
 
-    
-    let wasi_ctx = peridot_s3_ctx::PeridotS3Ctx::new(wasi);
-    peridot_s3_ctx::add_to_linker(&mut linker, |cx| cx)?;
-    let mut store = Store::new(&engine, wasi_ctx);
+    #[cfg(feature = "peridot-token-ctx")]
+    {
+        let end_thread = Arc::new(AtomicBool::new(false));
+        let token_bucket = Arc::new(Mutex::new(TokenBucket::new(10000, 10000, 1)));
+        let peridot_ctx = peridot_token_ctx::PeridotTokenCtx::new(wasi, token_bucket.clone());
+    }
+    #[cfg(feature = "peridot-geds-ctx")]
+    let peridot_ctx = peridot_geds_ctx::PeridotGEDSCtx::new(wasi);
+    #[cfg(feature = "peridot-clock-ctx")]
+    let peridot_ctx = peridot_clock_ctx::PeridotClockCtx::new(wasi);
+    #[cfg(feature = "peridot-counter-ctx")]
+    let peridot_ctx = peridot_counter_ctx::PeridotCounterCtx::new(wasi);
+
+    let mut store = Store::new(&engine, peridot_ctx);
+
     linker.allow_shadowing(true);
+
+    // Load and run the WebAssembly module
     let module = Module::from_file(&engine, module_path)?;
     linker.module(&mut store, "", &module)?;
 
-    let start = Instant::now();
+    // Run the module
+    #[cfg(feature = "peridot-token-ctx")]
+    {
+        let handle = start_update_rate_thread(
+            token_bucket,
+            end_thread.clone(),
+            format!("/tmp/{}_pipe", process::id()),
+        );
+
+        info!("Sleeping for {} seconds", 30 * _i);
+        thread::sleep(Duration::from_secs(30 * _i as u64));
+
+        match _overseer_address {
+            Some(overseer_address) => {
+                let mut client = OverseerGrpcClient::new(overseer_address);
+                client.register_module(process::id(), _demand)?;
+            }
+            None => (),
+        };
+    }
+
     linker
         .get_default(&mut store, "")?
         .typed::<(), ()>(&store)?
         .call(&mut store, ())?;
-    let duration = start.elapsed();
-    println!("Module {} executed in: {:?}", module_path, duration);
-    println!("Module {} throughput: {} imgs/s", module_path, 100.0 / duration.as_secs_f64());
+
+    #[cfg(feature = "peridot-token-ctx")]
+    {
+        end_thread.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+    }
     Ok(())
+}
+
+#[cfg(feature = "peridot-token-ctx")]
+fn start_update_rate_thread(
+    token_bucket: Arc<Mutex<TokenBucket>>,
+    end_thread: Arc<AtomicBool>,
+    pipe_path: String,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let listener = UnixListener::bind(pipe_path).unwrap();
+        let (mut stream, _) = listener.accept().unwrap();
+        while !end_thread.load(Ordering::Relaxed) {
+            let mut buffer = [0u8; 8]; // Buffer for f64 (8 bytes)
+            match stream.read_exact(&mut buffer) {
+                Ok(_) => {
+                    let received_value = f64::from_le_bytes(buffer);
+                    {
+                        debug!("Received new rate: {}", received_value);
+                        let mut token_bucket = token_bucket.lock().unwrap();
+                        token_bucket.set_max_capacity(received_value as u64);
+                    }
+                }
+                Err(_) => {
+                    info!(
+                        "Reached EOF in PID {}. Exiting update rate thread.",
+                        process::id()
+                    );
+                    break;
+                }
+            }
+            thread::sleep(Duration::from_secs(1));
+        }
+    })
+}
+
+#[cfg(feature = "peridot-token-ctx")]
+fn communicate_updates(updated_bandwidth: &HashMap<u32, f64>, pipes: &HashMap<u32, UnixStream>) {
+    for (pid, demand) in updated_bandwidth {
+        let mut stream = pipes.get(&pid).unwrap();
+        let bytes = demand.to_le_bytes();
+        match stream.write(&bytes) {
+            Ok(_) => (),
+            Err(e) => warn!("Error writing to pipe: {}", e),
+        };
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -91,6 +191,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut children = vec![];
+    #[cfg(feature = "peridot-token-ctx")]
+    let mut pipes: HashMap<u32, UnixStream> = HashMap::new();
     let mut client = None;
     if let Some(ref address) = overseer_address {
         client = Some(OverseerGrpcClient::new(address));
@@ -115,7 +217,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &module_config.args,
                     children.len(),
                     overseer_address,
-                    *module_config.peridot_config.get("demand").unwrap()
+                    *module_config.peridot_config.get("demand").unwrap(),
                 ) {
                     eprintln!("Error running module \"{}\": {}", &module_path, e);
                     process::exit(1);
@@ -123,7 +225,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 process::exit(0);
             }
             Ok(ForkResult::Parent { child }) => {
-                info!("Spawned process with PID: {}", child);
+                #[cfg(feature = "peridot-token-ctx")]
+                if client.is_some() {
+                    // wait until /tmp/{pid}_pipe is created
+                    while !fs::metadata(format!("/tmp/{}_pipe", child.as_raw())).is_ok() {
+                        thread::sleep(Duration::from_millis(100));
+                    }
+
+                    pipes.insert(
+                        child.as_raw() as u32,
+                        UnixStream::connect(format!("/tmp/{}_pipe", child.as_raw()))?,
+                    );
+                }
+                debug!("Spawned process with PID: {}", child);
                 children.push(child);
             }
             Err(e) => {
@@ -137,6 +251,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while !children.is_empty() {
         let mut to_remove = vec![];
+        #[cfg(feature = "peridot-token-ctx")]
+        if let Some(ref mut client) = client {
+            let updated_bandwidth = client
+                .update_max_bandwidth(children.iter().map(|pid| pid.as_raw() as u32).collect());
+            communicate_updates(&updated_bandwidth, &pipes);
+        }
 
         for (index, pid) in children.iter().enumerate() {
             match waitpid(Some(*pid), Some(WaitPidFlag::WNOHANG)) {
@@ -144,7 +264,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(ref mut client) = client {
                         client.remove_module(pid.as_raw() as u32)?;
                     }
-                    info!("Process {} exited with status {}", pid, status);
+                    debug!("Process {} exited with status {}", pid, status);
                     to_remove.push(index);
                 }
                 Ok(_) => {}

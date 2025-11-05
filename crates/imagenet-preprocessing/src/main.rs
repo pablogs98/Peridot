@@ -27,7 +27,7 @@ fn main() {
             break;
         }
         let image = image.unwrap();
-        if image.path().extension().is_some_and(|ext| ext == "jpg" || ext == "png") {
+        if image.path().extension().is_some_and(|ext| ext == "jpeg" || ext == "png" || ext == "jpg") {
             //println!("Found image: {}", image.path().display());
             image_paths.push(image.path().to_str().unwrap().to_string());
         }
