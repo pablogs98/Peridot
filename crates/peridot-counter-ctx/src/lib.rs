@@ -26,8 +26,8 @@ impl PeridotCounterCtx {
         &mut self.inner
     }
 
-    pub fn increment_counter(&mut self) {
-        self.counter += 1;
+    pub fn increment_counter(&mut self, bytes: u64) {
+        self.counter += bytes;
     }
 
     pub fn get_counter(&self) -> u64 {
@@ -206,8 +206,9 @@ impl WasiSnapshotPreview1 for PeridotCounterCtx {
         iovs: CiovecArray,
         offset: Filesize,
     ) -> Result<Size, Error> {
-        self.increment_counter();
-        WasiSnapshotPreview1::fd_pwrite(&mut self.inner, mem, fd, iovs, offset).await
+        let written_bytes = WasiSnapshotPreview1::fd_pwrite(&mut self.inner, mem, fd, iovs, offset).await?;
+        self.increment_counter(written_bytes as u64);
+        Ok(written_bytes)
     }
 
     async fn fd_read(
@@ -263,8 +264,9 @@ impl WasiSnapshotPreview1 for PeridotCounterCtx {
         fd: Fd,
         iovs: CiovecArray,
     ) -> Result<Size, Error> {
-        self.increment_counter();
-        WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await
+        let written_bytes = WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await?;
+        self.increment_counter(written_bytes as u64);
+        Ok(written_bytes)
     }
 
     async fn path_create_directory(
