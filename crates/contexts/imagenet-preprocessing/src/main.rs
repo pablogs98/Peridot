@@ -1,30 +1,38 @@
 use std::env::args;
-use std::fs;
+use std::{fs, thread};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use log::info;
 use std::ffi::CString;
 use std::os::fd::RawFd;
+use std::time::Duration;
 use libc::{open, O_CREAT, O_RDWR, O_TRUNC, S_IRUSR, S_IWUSR};
 
 fn main() {
     // get time
     let args = args().collect::<Vec<String>>();
-    if args.len() != 3 {
+    if args.len() != 2 {
         println!("Usage: imagenet-preprocessing <use_geds:true|false> <num_images>");
         info!("Usage: imagenet-preprocessing <use_geds:true|false> <num_images>");
         return;
     }
     println!("Starting imagenet-preprocessing");
-    let use_geds = args[1].parse::<bool>().unwrap();
-    let num_images = args[2].parse::<usize>().unwrap();
+    let use_geds = args[0].parse::<bool>().unwrap();
+    let num_images = args[1].parse::<usize>().unwrap();
 
-    let image_paths = [
-        "/home/malvarez/Documents/WASM/peridot/tabby.png",
-        "/home/malvarez/Documents/WASM/peridot/banana.jpg",
-        "/home/malvarez/Documents/WASM/peridot/cougar.jpg",
-    ];
+    let mut image_paths = vec![];
+    for image in fs::read_dir("./resources").unwrap() {
+        if image_paths.len() >= num_images {
+            break;
+        }
+        let image = image.unwrap();
+        if image.path().extension().is_some_and(|ext| ext == "jpeg" || ext == "png" || ext == "jpg") {
+            //println!("Found image: {}", image.path().display());
+            image_paths.push(image.path().to_str().unwrap().to_string());
+        }
+    }
+
     let image_paths = image_paths
         .iter()
         .map(|p| PathBuf::from(p))
@@ -41,11 +49,21 @@ fn main() {
 
 fn write_tensor_to_file(file_name: &str, tensor: &[u8]) -> std::io::Result<()> {
     println!("Trying to open file {}", file_name);
-    {
-        fs::write(file_name, tensor)?;
-        println!("Opened {}", file_name);
+    let mut attempts = 0;
+    loop {
+        match fs::write(file_name, tensor) {
+            Ok(_) => {
+                println!("Opened {}", file_name);
+                return Ok(());
+            }
+            Err(e) if attempts < 5 => {
+                println!("Retrying write (attempt {}): {}", attempts + 1, e);
+                attempts += 1;
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(e),
+        }
     }
-    Ok(())
 }
 
 
@@ -71,19 +89,20 @@ fn preprocess(images: &[Vec<u8>], use_geds: bool) -> Vec<Vec<u8>> {
             &[0.485, 0.456, 0.406],
             &[0.229, 0.224, 0.225],
         );
-        let file_name;
-        if use_geds
-        {
-            file_name = format!("/home/ubuntu/Peridot/crates/imagenet-preprocessing/s3://geds-default/tensor_{}.bin", i);
-        }
-        else {
-            file_name = format!("/home/malvarez/Documents/WASM/peridot/tensor_{}.bin", i);
-        }
+        let file_name = if use_geds {
+            format!("s3://pgimeno-data/tensors/tensor_{}.bin", i)
+        } else {
+            format!("./tensors/tensors/tensor_{}.bin", i)
+        };
+        
         write_tensor_to_file(&file_name, &processed_image).unwrap();
-        i = i + 1;
+
+        processed_images.push(processed_image);
+        i += 1;
     }
     processed_images
 }
+
 
 fn preprocess_one(image: &[u8], height: u32, width: u32, _mean: &[f32], _std: &[f32]) -> Vec<u8> {
     let img = image::load_from_memory(&image).unwrap().to_rgb8();

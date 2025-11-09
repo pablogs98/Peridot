@@ -1,14 +1,4 @@
-use log::{error, info};
-use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
-use std::time::Duration;
-use aws_sdk_s3::error::SdkError;
-use aws_sdk_s3::operation::put_object::{PutObjectError, PutObjectOutput};
-use aws_sdk_s3::primitives::ByteStream;
-use tokio::runtime::Runtime;
-use tokio::task::JoinHandle;
-use tokio::time::Instant;
-use wasi_common::snapshots::preview_1::types;
 use wasi_common::snapshots::preview_1::types::{
     Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta,
     Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights,
@@ -16,97 +6,16 @@ use wasi_common::snapshots::preview_1::types::{
 };
 use wasi_common::snapshots::preview_1::wasi_snapshot_preview1::WasiSnapshotPreview1;
 use wasi_common::{Error, WasiCtx};
-use wiggle::{GuestError, GuestMemory, GuestPtr};
+use wiggle::{GuestMemory, GuestPtr};
 
-#[derive(Default)]
-struct S3Descriptors {
-    used: BTreeMap<u32, String>,
-    free: Vec<u32>,
-}
-
-impl Deref for S3Descriptors {
-    type Target = BTreeMap<u32, String>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.used
-    }
-}
-
-impl DerefMut for S3Descriptors {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.used
-    }
-}
-
-impl S3Descriptors {
-    fn new() -> S3Descriptors {
-        let descriptors = Self::default();
-        descriptors
-    }
-
-    /// Returns next descriptor number, which was never assigned
-    fn unused(&self) -> Result<u32, ()> {
-        match self.last_key_value() {
-            Some((fd, _)) => {
-                if let Some(fd) = fd.checked_add(1) {
-                    return Ok(fd);
-                }
-                if self.len() == u32::MAX as usize {
-                    return Err(());
-                }
-                // TODO: Optimize
-                Ok((8192..u32::MAX)
-                    .rev()
-                    .find(|fd| !self.contains_key(fd))
-                    .expect("failed to find an unused file descriptor"))
-            }
-            None => Ok(0),
-        }
-    }
-
-    fn remove(&mut self, fd: types::Fd) -> Option<String> {
-        let fd = fd.into();
-        let desc = self.used.remove(&fd)?;
-        self.free.push(fd);
-        Some(desc)
-    }
-
-    /// Pushes the [Descriptor] returning corresponding number.
-    /// This operation will try to reuse numbers previously removed via [`Self::remove`]
-    /// and rely on [`Self::unused`] if no free numbers are recorded
-    fn push(&mut self, desc: String) -> Result<u32, ()> {
-        let fd = if let Some(fd) = self.free.pop() {
-            fd
-        } else {
-            self.unused()?
-        };
-        assert!(self.insert(fd, desc).is_none());
-        Ok(fd)
-    }
-}
-
-pub struct PeridotS3Ctx {
+pub struct PeridotCounterCtx {
     inner: WasiCtx,
-    s3: aws_sdk_s3::Client,
-    s3_descriptors: S3Descriptors,
-    tokio_runtime: Runtime,
-    futures: Vec<JoinHandle<(Result<PutObjectOutput, SdkError<PutObjectError>>, std::time::Duration, Instant)>>,
-
+    counter: u64
 }
-impl PeridotS3Ctx {
+impl PeridotCounterCtx {
     pub fn new(inner: WasiCtx) -> Self {
         std::env::set_var("WASMTIME_LOG", "wasmtime_wasi=trace");
-        let config = Runtime::new()
-            .unwrap()
-            .block_on(aws_config::load_from_env());
-        let client = aws_sdk_s3::Client::new(&config);
-        Self {
-            inner,
-            s3: client,
-            s3_descriptors: S3Descriptors::new(),
-            tokio_runtime: Runtime::new().unwrap(),
-            futures: Vec::new(),
-        }
+        Self { inner, counter: 0 }
     }
 
     pub fn get_inner(&self) -> &WasiCtx {
@@ -116,33 +25,18 @@ impl PeridotS3Ctx {
     pub fn get_inner_mut(&mut self) -> &mut WasiCtx {
         &mut self.inner
     }
-}
 
-pub struct TimedJoinHandle {
-    handle: JoinHandle<Result<PutObjectOutput,SdkError<PutObjectError>>>,
-    start: Instant,
-}
+    pub fn increment_counter(&mut self, bytes: u64) {
+        self.counter += bytes;
+    }
 
-impl PeridotS3Ctx {
-    fn spawn_s3_upload(&mut self, bucket: String, key: String, body: ByteStream) {
-        let client = self.s3.clone();
-        let handle = self.tokio_runtime.spawn(async move {
-            let start = Instant::now();
-            let result = client.put_object()
-                .bucket(bucket)
-                .key(key)
-                .body(body)
-                .send()
-                .await;
-            let elapsed = start.elapsed();
-            (result, elapsed, start)
-        });
-        self.futures.push(handle);
+    pub fn get_counter(&self) -> u64 {
+        self.counter
     }
 }
 
 #[async_trait::async_trait]
-impl WasiSnapshotPreview1 for PeridotS3Ctx {
+impl WasiSnapshotPreview1 for PeridotCounterCtx {
     async fn args_get(
         &mut self,
         mem: &mut GuestMemory<'_>,
@@ -211,17 +105,10 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
     }
 
     async fn fd_close(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
-        if self.s3_descriptors.contains_key(&u32::from(fd)) {
-            self.s3_descriptors.remove(fd);
-            return Ok(());
-        }
         WasiSnapshotPreview1::fd_close(&mut self.inner, mem, fd).await
     }
 
     async fn fd_datasync(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
-        if self.s3_descriptors.contains_key(&u32::from(fd)) {
-            return Ok(());
-        }
         WasiSnapshotPreview1::fd_datasync(&mut self.inner, mem, fd).await
     }
 
@@ -252,7 +139,7 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
             fs_rights_base,
             fs_rights_inheriting,
         )
-        .await
+            .await
     }
 
     async fn fd_filestat_get(
@@ -319,21 +206,9 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
         iovs: CiovecArray,
         offset: Filesize,
     ) -> Result<Size, Error> {
-        println!("fd_pwritin'");
-        if self.s3_descriptors.contains_key(&u32::from(fd)) {
-            let s3_file = self.s3_descriptors.get(&u32::from(fd)).unwrap();
-            let buf = first_non_empty_ciovec(mem, iovs)?;
-            let buf = mem.to_vec(buf)?;
-            let len = buf.len();
-            let body = aws_sdk_s3::primitives::ByteStream::from(buf);
-            // obtain bucket and key from s3 file:
-            let bucket = s3_file.split("/").next().unwrap();
-            let key = s3_file.split("/").skip(1).collect::<Vec<&str>>().join("/");
-            self.spawn_s3_upload(bucket.to_string(), key.to_string(), body);
-            return Ok(u32::try_from(len)?);
-        }
-        println!("Regular fd_pwrite");
-        WasiSnapshotPreview1::fd_pwrite(&mut self.inner, mem, fd, iovs, offset).await
+        let written_bytes = WasiSnapshotPreview1::fd_pwrite(&mut self.inner, mem, fd, iovs, offset).await?;
+        self.increment_counter(written_bytes as u64);
+        Ok(written_bytes)
     }
 
     async fn fd_read(
@@ -389,18 +264,9 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
         fd: Fd,
         iovs: CiovecArray,
     ) -> Result<Size, Error> {
-        if self.s3_descriptors.contains_key(&u32::from(fd)) {
-            let s3_file = self.s3_descriptors.get(&u32::from(fd)).unwrap();
-            let buf = first_non_empty_ciovec(mem, iovs)?;
-            let buf = mem.to_vec(buf)?;
-            let len = buf.len();
-            let body = aws_sdk_s3::primitives::ByteStream::from(buf);
-            let bucket = s3_file.split("//").nth(1).unwrap().split("/").next().unwrap();
-            let key = s3_file.split("/").skip(3).collect::<Vec<&str>>().join("/");
-            self.spawn_s3_upload(bucket.to_string(), key.to_string(), body);
-            return Ok(u32::try_from(len)?);
-        }
-        WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await
+        let written_bytes = WasiSnapshotPreview1::fd_write(&mut self.inner, mem, fd, iovs).await?;
+        self.increment_counter(written_bytes as u64);
+        Ok(written_bytes)
     }
 
     async fn path_create_directory(
@@ -442,7 +308,7 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
             mtim,
             fst_flags,
         )
-        .await
+            .await
     }
 
     async fn path_link(
@@ -463,7 +329,7 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
             new_fd,
             new_path,
         )
-        .await
+            .await
     }
 
     async fn path_open(
@@ -477,13 +343,6 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
         fs_rights_inheriting: Rights,
         fdflags: Fdflags,
     ) -> Result<Fd, Error> {
-        let str_path = read_string(mem, path)?;
-        if let Some(start) = str_path.find("s3://") {
-            let str_path = &str_path[start..];
-            let fd = self.s3_descriptors.push(str_path.to_string()).unwrap();
-            let fd = fd.into();
-            return Ok(fd);
-        }
         WasiSnapshotPreview1::path_open(
             &mut self.inner,
             mem,
@@ -495,7 +354,7 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
             fs_rights_inheriting,
             fdflags,
         )
-        .await
+            .await
     }
 
     async fn path_readlink(
@@ -619,25 +478,7 @@ impl WasiSnapshotPreview1 for PeridotS3Ctx {
     }
 }
 
-fn read_string<'a>(memory: &'a GuestMemory<'_>, ptr: GuestPtr<str>) -> Result<String, GuestError> {
-    Ok(memory.as_cow_str(ptr)?.into_owned())
-}
-
-fn first_non_empty_ciovec(
-    memory: &GuestMemory<'_>,
-    ciovs: types::CiovecArray,
-) -> Result<GuestPtr<[u8]>, GuestError> {
-    for iov in ciovs.iter() {
-        let iov = memory.read(iov?)?;
-        if iov.buf_len == 0 {
-            continue;
-        }
-        return Ok(iov.buf.as_array(iov.buf_len));
-    }
-    Ok(GuestPtr::new((0, 0)))
-}
-
-impl Deref for PeridotS3Ctx {
+impl Deref for PeridotCounterCtx {
     type Target = WasiCtx;
 
     fn deref(&self) -> &Self::Target {
@@ -645,60 +486,11 @@ impl Deref for PeridotS3Ctx {
     }
 }
 
-impl Drop for PeridotS3Ctx {
+impl Drop for PeridotCounterCtx {
     fn drop(&mut self) {
-        if self.futures.is_empty() {
-            return;
-        }
-
-        info!("Waiting for {} pending S3 uploads...", self.futures.len());
-
-        let mut total_elapsed = Duration::ZERO;
-        let mut completed = 0;
-        let mut first_start = None;
-        let mut last_end = None;
-
-        for handle in self.futures.drain(..) {
-            match self.tokio_runtime.block_on(handle) {
-                Ok((Ok(_), elapsed, start)) => {
-                    let end = start + elapsed;
-                    info!("Upload completed in {:.2?}", elapsed);
-
-                    if first_start.is_none() || start < first_start.unwrap() {
-                        first_start = Some(start);
-                    }
-                    if last_end.is_none() || end > last_end.unwrap() {
-                        last_end = Some(end);
-                    }
-
-                    total_elapsed += elapsed;
-                    completed += 1;
-                }
-                Ok((Err(e), _, _)) => {
-                    error!("S3 upload failed: {:?}", e);
-                }
-                Err(join_err) => {
-                    error!("Task join error: {:?}", join_err);
-                }
-            }
-        }
-
-        if completed > 0 {
-            let avg = total_elapsed / completed as u32;
-            info!("Average S3 upload time: {:.2?}", avg);
-
-            if let (Some(start), Some(end)) = (first_start, last_end) {
-                let duration_sec = end.duration_since(start).as_secs_f64();
-                if duration_sec > 0.0 {
-                    let sps = completed as f64 / duration_sec;
-                    info!("Avg. uploads per second: {:.2}", sps);
-                }
-            }
-        }
+        println!("Count {}", self.get_counter());
     }
 }
-
-
 
 #[macro_export]
 macro_rules! define_wasi {
