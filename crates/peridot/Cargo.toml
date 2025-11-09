@@ -8,3 +8,5 @@ edition.workspace = true
 serde = { version = "1.0.217", features = ["derive"] }
 serde_yaml = "0.9.34+deprecated"
 log = { workspace = true }
+uuid = { version = "1.18.1", features = ["v4"] }
+peridot-overseer-grpc = { workspace = true }

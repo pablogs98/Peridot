@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use std::{env, fs, process, thread};
 use wasi_common::sync::{Dir, WasiCtxBuilder};
-use wasmtime::*;
+use wasmtime::{Engine, Linker, Module, Store, Result};
 
 /// Peridot - Transparent Integration of new logic in legacy Wasm modules
 #[derive(Parser, Debug)]

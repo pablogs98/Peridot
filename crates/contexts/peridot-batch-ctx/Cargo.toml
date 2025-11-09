@@ -5,16 +5,17 @@ authors.workspace = true
 edition.workspace = true
 
 [dependencies]
+rand = "0.8.5"
+arrow = "50.0.0"
+parquet = "50.0.0"
+chrono = "=0.4.31"
+
 wiggle = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 wasi-common = { workspace = true }
 wasmtime = { workspace = true }
 log = { workspace = true }
-aws-sdk-s3 = "1.79.0"
-aws-config = { version = "1.1.7", features = ["behavior-version-latest"] }
 tokio = { workspace = true }
-rand = "0.8.5"
-arrow = "50.0.0"
-parquet = "50.0.0"
-chrono = "=0.4.31"
+aws-sdk-s3 = {workspace = true}
+aws-config = { workspace = true, features = ["behavior-version-latest"] }

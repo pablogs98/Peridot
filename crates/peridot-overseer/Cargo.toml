@@ -5,14 +5,15 @@ authors.workspace = true
 edition.workspace = true
 
 [dependencies]
-tokio = { workspace = true }
 tokio-macros = "2.5.0"
-tonic = "0.12.3"
-peridot-overseer-grpc = { path = "../peridot-overseer-grpc" }
 async-stream = "0.3.6"
+
 env_logger = {workspace = true}
 clap = {workspace = true }
 log = { workspace = true }
+peridot-overseer-grpc = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.12.3"

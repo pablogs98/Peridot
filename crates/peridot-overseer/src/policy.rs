@@ -3,18 +3,18 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Min-Max Fair Share Control Algorithm
-/// as seen in PAIO: https://www.usenix.org/system/files/fast22-macedo.pdf
+/// as seen in PAIO, from [Usenix FAST '22](https://www.usenix.org/system/files/fast22-macedo.pdf).
 pub struct MinMaxFairShare {
     max_bandwidth: f64,
-    demands: Arc<Mutex<HashMap<u32, f64>>>,
-    rates: Arc<Mutex<HashMap<u32, f64>>>,
+    demands: Arc<Mutex<HashMap<String, f64>>>,
+    rates: Arc<Mutex<HashMap<String, f64>>>,
 }
 
 impl MinMaxFairShare {
     pub fn new(
         max_bandwidth: f64,
-        demands: Arc<Mutex<HashMap<u32, f64>>>,
-        rates: Arc<Mutex<HashMap<u32, f64>>>,
+        demands: Arc<Mutex<HashMap<String, f64>>>,
+        rates: Arc<Mutex<HashMap<String, f64>>>,
     ) -> MinMaxFairShare {
         MinMaxFairShare {
             max_bandwidth,
@@ -32,11 +32,11 @@ impl MinMaxFairShare {
             let fair_share = left_bandwidth / active as f64;
 
             if demand <= fair_share {
-                self.rates.lock().await.insert(*key, demand);
+                self.rates.lock().await.insert(key.clone(), demand);
             } else {
-                self.rates.lock().await.insert(*key, fair_share);
+                self.rates.lock().await.insert(key.clone(), fair_share);
             }
-            left_bandwidth -= self.rates.lock().await[&key];
+            left_bandwidth -= self.rates.lock().await.get(&key.clone()).unwrap();
             active -= 1;
         }
     }
