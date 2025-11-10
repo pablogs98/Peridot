@@ -3611,8 +3611,6 @@ dependencies = [
  "peridot",
  "peridot-clock-ctx",
  "peridot-geds-ctx",
- "peridot-overseer-grpc",
- "peridot-plugin-interface",
  "peridot-s3-ctx",
  "peridot-token-ctx",
  "wasi-common",

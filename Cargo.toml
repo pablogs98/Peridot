@@ -51,12 +51,10 @@ async-trait = "0.1.85"
 
 [dependencies]
 nix = { version = "0.29.0", features = ["process"] }
-peridot-overseer-grpc = { path = "crates/peridot-overseer-grpc" }
 peridot-token-ctx = { path = "crates/contexts/peridot-token-ctx", optional = true }
 peridot-geds-ctx = { path = "crates/contexts/peridot-geds-ctx", optional = true }
 peridot-clock-ctx = { path = "crates/contexts/peridot-clock-ctx", optional = true }
-peridot-s3-ctx = { path = "crates/contexts/peridot-s3-ctx", optional = true }
-peridot-plugin-interface = { path = "crates/peridot-plugin-interface" }
+peridot-s3-ctx = { path = "crates/contexts/peridot-s3-ctx" }
 
 wasmtime = { workspace = true }
 wasi-common = { workspace = true }
@@ -66,6 +64,7 @@ env_logger = { workspace = true }
 peridot = { workspace = true }
 
 [features]
-token = ["peridot-token-ctx"]
-geds = ["peridot-geds-ctx"]
-clock = ["peridot-clock-ctx"]
+token = ["dep:peridot-token-ctx"]
+geds = ["dep:peridot-geds-ctx"]
+clock = ["dep:peridot-clock-ctx"]
+counter = []    # "dep:peridot-counter-ctx"

@@ -106,7 +106,7 @@ async fn grpc_sigint(end_threads: Arc<AtomicBool>) {
 
 async fn update_io_stats(
     received_metrics: Arc<Mutex<HashMap<String, Vec<f64>>>>,
-    processed_metrics: Arc<Mutex<HashMap<String, f64>>>,
+    _processed_metrics: Arc<Mutex<HashMap<String, f64>>>,
     rates: Arc<Mutex<HashMap<String, f64>>>,
     demands: Arc<Mutex<HashMap<String, f64>>>,
     max_bandwidth: f64,

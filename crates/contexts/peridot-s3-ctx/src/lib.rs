@@ -118,11 +118,6 @@ impl PeridotS3Ctx {
     }
 }
 
-pub struct TimedJoinHandle {
-    handle: JoinHandle<Result<PutObjectOutput,SdkError<PutObjectError>>>,
-    start: Instant,
-}
-
 impl PeridotS3Ctx {
     fn spawn_s3_upload(&mut self, bucket: String, key: String, body: ByteStream) {
         let client = self.s3.clone();

@@ -1,6 +1,6 @@
 use peridot_overseer_grpc::client::OverseerGrpcClient;
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Sender};
 use std::sync::{Arc, Mutex, RwLock};
 use std::{fs, thread, time};
 use std::path::Path;

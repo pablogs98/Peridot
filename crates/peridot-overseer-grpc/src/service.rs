@@ -17,7 +17,7 @@ use overseer_proto::{
 #[derive(Default)]
 pub struct OverseerService {
     received_metrics: Arc<Mutex<HashMap<String, Vec<f64>>>>,
-    processed_metrics: Arc<Mutex<HashMap<String, f64>>>,
+    _processed_metrics: Arc<Mutex<HashMap<String, f64>>>,
 
     // IO-specific metrics
     demands: Arc<Mutex<HashMap<String, f64>>>,
@@ -25,8 +25,8 @@ pub struct OverseerService {
 }
 
 impl OverseerService {
-    pub fn new(received_metrics: Arc<Mutex<HashMap<String, Vec<f64>>>>, processed_metrics: Arc<Mutex<HashMap<String, f64>>>, demands: Arc<Mutex<HashMap<String, f64>>>, rates: Arc<Mutex<HashMap<String, f64>>>) -> Self {
-        Self { received_metrics, processed_metrics, demands, rates}
+    pub fn new(received_metrics: Arc<Mutex<HashMap<String, Vec<f64>>>>, _processed_metrics: Arc<Mutex<HashMap<String, f64>>>, demands: Arc<Mutex<HashMap<String, f64>>>, rates: Arc<Mutex<HashMap<String, f64>>>) -> Self {
+        Self { received_metrics, _processed_metrics, demands, rates}
     }
 }
 
@@ -56,7 +56,7 @@ impl Overseer for OverseerService {
 
     async fn update_metrics(&self, request: Request<UpdateMetricsRequest>) -> Result<Response<UpdateMetricsResponse>, Status> {
         let inner = request.into_inner();
-        let mut metrics = &inner.metrics;
+        let metrics = &inner.metrics;
         for (key, value) in metrics {
             match self.received_metrics.lock().await.get(key) {
                 Some(vec) => {

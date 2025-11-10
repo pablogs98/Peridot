@@ -1,13 +1,8 @@
 use std::env::args;
 use std::{fs, thread};
-use std::fs::{File, OpenOptions};
-use std::io::Write;
 use std::path::PathBuf;
 use log::info;
-use std::ffi::CString;
-use std::os::fd::RawFd;
 use std::time::Duration;
-use libc::{open, O_CREAT, O_RDWR, O_TRUNC, S_IRUSR, S_IWUSR};
 
 fn main() {
     // get time
@@ -18,7 +13,7 @@ fn main() {
         return;
     }
     println!("Starting imagenet-preprocessing");
-    let use_geds = args[0].parse::<bool>().unwrap();
+    let _use_geds = args[0].parse::<bool>().unwrap();
     let num_images = args[1].parse::<usize>().unwrap();
 
     let mut image_paths = vec![];
@@ -38,11 +33,10 @@ fn main() {
         .map(|p| PathBuf::from(p))
         .collect::<Vec<PathBuf>>();
     let start = std::time::Instant::now();
-    let images = read_images(&image_paths, num_images).unwrap();
+    let _images = read_images(&image_paths, num_images).unwrap();
     let elapsed = start.elapsed();
     println!("Read images in {} ms", elapsed.as_millis());
     let start = std::time::Instant::now();
-    let batch_tensors = preprocess(&images, use_geds);
     let elapsed = start.elapsed();
     println!("Preprocessed images in {} ms", elapsed.as_millis());
 }
