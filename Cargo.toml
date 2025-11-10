@@ -54,5 +54,6 @@ async-trait = "0.1.85"
 [features]
 token = ["peridot-token-ctx"]
 geds = ["peridot-geds-ctx"]
+s3 = ["peridot-s3-ctx"]
 clock = ["peridot-clock-ctx"]
 counter = ["peridot-counter-ctx"]

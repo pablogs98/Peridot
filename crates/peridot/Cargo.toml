@@ -5,6 +5,11 @@ authors.workspace = true
 edition.workspace = true
 
 [dependencies]
+wiggle = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+wasi-common = { workspace = true }
+wasmtime = { workspace = true }
+log = { workspace = true }
 serde = { version = "1.0.217", features = ["derive"] }
 serde_yaml = "0.9.34+deprecated"
-log = { workspace = true }

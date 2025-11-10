@@ -14,3 +14,4 @@ log = { workspace = true }
 aws-sdk-s3 = "1.79.0"
 aws-config = { version = "1.1.7", features = ["behavior-version-latest"] }
 tokio = { workspace = true }
+peridot = { path = "../peridot" }

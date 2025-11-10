@@ -23,8 +23,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "peridot-token-ctx")]
 use std::os::unix::net::{UnixListener, UnixStream};
+use peridot::context::{PeridotContext, WasiWrapper};
 #[cfg(feature = "peridot-token-ctx")]
 use peridot::token::TokenBucket;
+use peridot_s3_ctx::PeridotS3Ctx;
 
 /// Peridot - Transparent Integration of new logic in legacy Wasm modules
 #[derive(Parser, Debug)]
@@ -58,11 +60,15 @@ fn run_module(
     info!("Args {:?}", args);
 
     // Set up WASI
+    println!("Module path: {}", module_path);
+    let module_dir = Path::new(module_path).parent().unwrap();
+    println!("Module dir: {}",module_dir.display());
+
     let wasi = WasiCtxBuilder::new()
         .inherit_stdio()
         .preopened_dir(
-            Dir::from_std_file(fs::File::open(Path::new(module_path).parent().unwrap())?),
-            Path::new(module_path).parent().unwrap(),
+            Dir::from_std_file(fs::File::open(module_dir)?),
+            Path::new("."),
         )?
         .args(args)?
         .build();
@@ -79,6 +85,13 @@ fn run_module(
     let peridot_ctx = peridot_clock_ctx::PeridotClockCtx::new(wasi);
     #[cfg(feature = "peridot-counter-ctx")]
     let peridot_ctx = peridot_counter_ctx::PeridotCounterCtx::new(wasi);
+    #[cfg(feature = "peridot-s3-ctx")]
+
+    let s3peridot_ctx = PeridotS3Ctx::new(PeridotContext::new(wasi));
+    let peridot_ctx = WasiWrapper::new(s3peridot_ctx);
+
+    peridot::context::add_to_linker(&mut linker, |cx| cx);
+
 
     let mut store = Store::new(&engine, peridot_ctx);
 
