@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::{fs, thread, time};
 use std::path::Path;
 use uuid::Uuid;
+use crate::conf::PeridotConfig;
 
 ///
 /// [MetricsPublisher] is responsible for collecting metrics from and sending metrics to the Overseer,
@@ -34,7 +35,7 @@ impl MetricsPublisher {
 
     /// Spawns a thread that periodically collects metrics and sends them to the overseer.
     /// Updates items that implement the [MetricsSubscriber] trait with the received metrics.
-    pub async fn spawn_metrics_update_thread(&mut self) {
+    pub async fn spawn_metrics_update_thread(&mut self, conf: PeridotConfig) {
         let client = OverseerGrpcClient::new("/run/peridot/overseer.sock").await;
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx = Some(tx);
@@ -52,7 +53,9 @@ impl MetricsPublisher {
 
         let module_id = Uuid::new_v4().to_string();
 
-        match client.register_module(&module_id, -1.0) {
+        let demand = conf.io.demand;
+
+        match client.register_module(&module_id, demand) {
             Ok(()) => {
                 log::info!("Starting overseer thread. Wasm module ID: {}", &module_id);
                 let subscribers = Arc::clone(&self.subscribers);
