@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "token")]
 use std::os::unix::net::{UnixListener, UnixStream};
+use peridot::conf::PeridotConfig;
 #[cfg(feature = "token")]
 use peridot::token::TokenBucket;
 
@@ -178,18 +179,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let overseer_address = &args.overseer_address;
 
-    let config = match peridot::conf::new_config(&args.config_path) {
+    let config = match PeridotConfig::new(&args.config_path) {
         Ok(config) => config,
         Err(e) => {
             eprintln!("Error reading \"{}\": {}", &args.config_path, e);
             process::exit(1);
         }
     };
-
-    if config.is_empty() {
-        eprintln!("No configurations found in \"{}\".", &args.config_path);
-        process::exit(1);
-    }
 
     let mut children = vec![];
     #[cfg(feature = "token")]

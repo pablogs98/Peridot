@@ -14,19 +14,18 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::{fs, thread};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-use wasi_preview1::WasiP1Ctx;
 use wasmtime::component::types::ComponentItem;
 use wasmtime::component::{self, Component, ResourceTable};
-use wasmtime::{Config, Linker, Module, Precompiled, Store};
-use wasmtime_wasi::preview1::{self as wasi_preview1};
+use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
+use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::WasiCtxBuilder;
 
 pub struct PeridotShim;
 
-pub struct PeridotCompiler(wasmtime::Engine);
+pub struct PeridotCompiler(Engine);
 
 pub struct PeridotSandbox {
-    engine: wasmtime::Engine,
+    engine: Engine,
     metrics_publisher: Option<peridot::metrics::MetricsPublisher>,
     cancel: CancellationToken,
 }
@@ -37,7 +36,7 @@ impl Default for PeridotSandbox {
         config.async_support(true);
 
         Self {
-            engine: wasmtime::Engine::new(&config)
+            engine: Engine::new(&config)
                 .context("Failed to create wasmtime engine")
                 .unwrap(),
             cancel: CancellationToken::new(),
@@ -63,7 +62,7 @@ impl Shim for PeridotShim {
 
         config.async_support(true); // must be on
 
-        let engine = wasmtime::Engine::new(&config)
+        let engine = Engine::new(&config)
             .expect("failed to create wasmtime precompilation engine");
 
         Some(PeridotCompiler(engine))
@@ -106,7 +105,7 @@ impl Compiler for PeridotCompiler {
         let mut compiled_layers = Vec::<Option<Vec<u8>>>::with_capacity(layers.len());
 
         for layer in layers {
-            if self.0.detect_precompiled(&layer.layer).is_some() {
+            if Engine::detect_precompiled(&layer.layer).is_some() {
                 log::info!("Already precompiled");
                 compiled_layers.push(None);
                 continue;
@@ -141,23 +140,30 @@ impl PeridotSandbox {
         log::debug!("execute module");
 
         let ctx_p1 = wasi_builder(ctx)?.build_p1();
-        let mut store = Store::new(&self.engine, ctx_p1);
         let mut module_linker = Linker::new(&self.engine);
+        log::debug!("init linker");
 
-        log::debug!("init linker"); // todo: put custom contexts in here.
-        wasi_preview1::add_to_linker_async(&mut module_linker, |wasi_ctx: &mut WasiP1Ctx| {
+        #[cfg(feature = "token")]
+        let max_bandwidth: u64 = config.io.max_bandwidth as u64;
+        #[cfg(feature = "token")]
+        let token_bucket = Arc::new(Mutex::new(TokenBucket::new(
+            max_bandwidth,
+            max_bandwidth,
+            max_bandwidth,
+        )));
+
+        #[cfg(feature = "token")]
+        let peridot_ctx = peridot_token_ctx::PeridotTokenCtx::new(ctx_p1, Arc::clone(&token_bucket));
+
+        peridot_token_ctx::add_to_linker_async(&mut module_linker, |wasi_ctx: &mut WasiP1Ctx| {
             wasi_ctx
         })?;
 
-        let max_bandwidth: u64 = config.io.max_bandwidth as u64;
+        let mut store = Store::new(&self.engine, peridot_ctx);
 
         self.metrics_publisher
             .unwrap()
-            .subscribe(Arc::new(Mutex::new(TokenBucket::new(
-                max_bandwidth,
-                max_bandwidth,
-                max_bandwidth,
-            ))));
+            .subscribe(Arc::clone(&token_bucket));
 
         log::info!("instantiating instance");
         let instance: wasmtime::Instance =
@@ -192,7 +198,7 @@ impl PeridotSandbox {
             Some(WasmBinaryType::Component) => {
                 bail!("Peridot does not support direct execution of components yet");
             }
-            None => match self.engine.detect_precompiled(wasm_binary) {
+            None => match Engine::detect_precompiled(wasm_binary) {
                 Some(Precompiled::Module) => {
                     log::info!("using precompiled module");
                     let module = unsafe { Module::deserialize(&self.engine, wasm_binary) }?;

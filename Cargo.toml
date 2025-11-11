@@ -38,15 +38,15 @@ peridot-overseer-grpc = { path = "crates/peridot-overseer-grpc" , version = "0.1
 clap = { version = "4.5.31", features = ["derive"] }
 log = "0.4.26"
 env_logger = "0.11.6"
-wasmtime = "29.0.1"
-wasmtime-wasi = "29.0.1"
+wasmtime = "38.0.3"
+wasmtime-wasi = "38.0.3"
 tokio = { version = "1", features = ["full"] }
 tonic = "0.12.3"
 aws-sdk-s3 = "1.79.0"
 aws-config = "1.1.7"
 
 # for context crates
-wiggle = "29.0.1"
+wiggle = "38.0.3"
 anyhow = "1.0.95"
 async-trait = "0.1.85"
 
