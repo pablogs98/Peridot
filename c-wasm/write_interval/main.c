@@ -13,7 +13,7 @@ double get_current_time() {
 
 int main(int argc, char *argv[]) {
     if (argc != 4) {
-        printf("Uso: %s <file> <bytes_per_write> <seconds_between_writes>\n", argv[0]);
+        printf("Use: %s <file> <bytes_per_write> <seconds_between_writes>\n", argv[0]);
         return 1;
     }
 

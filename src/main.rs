@@ -78,6 +78,7 @@ fn run_module(
     let peridot_ctx = peridot_clock_ctx::PeridotClockCtx::new(wasi);
     #[cfg(feature = "counter")]
     let peridot_ctx = peridot_counter_ctx::PeridotCounterCtx::new(wasi);
+    #[cfg(feature = "s3")]
     let peridot_ctx = peridot_s3_ctx::PeridotS3Ctx::new(wasi);
 
     let mut store = Store::new(&engine, peridot_ctx);

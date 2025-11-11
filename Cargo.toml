@@ -18,6 +18,7 @@ members = [
     "crates/contexts/peridot-s3-ctx",
     "crates/contexts/peridot-syscall-batching-ctx",
     "crates/contexts/peridot-token-ctx",
+    "crates/contexts/peridot-counter-ctx"
 ]
 
 [workspace.package]
@@ -55,6 +56,7 @@ peridot-token-ctx = { path = "crates/contexts/peridot-token-ctx", optional = tru
 peridot-geds-ctx = { path = "crates/contexts/peridot-geds-ctx", optional = true }
 peridot-clock-ctx = { path = "crates/contexts/peridot-clock-ctx", optional = true }
 peridot-s3-ctx = { path = "crates/contexts/peridot-s3-ctx" }
+peridot-counter-ctx = { path = "crates/contexts/peridot-counter-ctx", optional = true }
 
 wasmtime = { workspace = true }
 wasi-common = { workspace = true }
@@ -65,6 +67,7 @@ peridot = { workspace = true }
 
 [features]
 token = ["dep:peridot-token-ctx"]
+s3 = ["dep:peridot-s3-ctx"]
 geds = ["dep:peridot-geds-ctx"]
 clock = ["dep:peridot-clock-ctx"]
-counter = []    # "dep:peridot-counter-ctx"
+counter = ["dep:peridot-counter-ctx"]
