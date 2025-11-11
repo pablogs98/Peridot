@@ -3610,6 +3610,7 @@ dependencies = [
  "nix 0.29.0",
  "peridot",
  "peridot-clock-ctx",
+ "peridot-counter-ctx",
  "peridot-geds-ctx",
  "peridot-s3-ctx",
  "peridot-token-ctx",
@@ -3624,6 +3625,17 @@ dependencies = [
  "anyhow",
  "async-trait",
  "log",
+ "wasi-common",
+ "wasmtime",
+ "wiggle",
+]
+
+[[package]]
+name = "peridot-counter-ctx"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
  "wasi-common",
  "wasmtime",
  "wiggle",

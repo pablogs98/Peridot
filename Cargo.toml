@@ -55,7 +55,7 @@ nix = { version = "0.29.0", features = ["process"] }
 peridot-token-ctx = { path = "crates/contexts/peridot-token-ctx", optional = true }
 peridot-geds-ctx = { path = "crates/contexts/peridot-geds-ctx", optional = true }
 peridot-clock-ctx = { path = "crates/contexts/peridot-clock-ctx", optional = true }
-peridot-s3-ctx = { path = "crates/contexts/peridot-s3-ctx" }
+peridot-s3-ctx = { path = "crates/contexts/peridot-s3-ctx", optional = true }
 peridot-counter-ctx = { path = "crates/contexts/peridot-counter-ctx", optional = true }
 
 wasmtime = { workspace = true }
@@ -71,3 +71,5 @@ s3 = ["dep:peridot-s3-ctx"]
 geds = ["dep:peridot-geds-ctx"]
 clock = ["dep:peridot-clock-ctx"]
 counter = ["dep:peridot-counter-ctx"]
+
+default = ["s3"]
