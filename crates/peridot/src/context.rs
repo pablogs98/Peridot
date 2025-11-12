@@ -1,57 +1,59 @@
 use async_trait::async_trait;
-use wasi_common::snapshots::preview_1::types::*;
-use wasi_common::snapshots::preview_1::wasi_snapshot_preview1::WasiSnapshotPreview1;
-use wasi_common::{Error, WasiCtx};
+use wasmtime_wasi::p1::types::{Error, Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta, Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights, Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence};
+use wasmtime_wasi::p1::wasi_snapshot_preview1::WasiSnapshotPreview1;
+use wasmtime_wasi::p1::{wasi_snapshot_preview1, WasiP1Ctx};
+use wasmtime_wasi::WasiCtx;
 use wiggle::{anyhow, GuestMemory, GuestPtr};
+
 
 #[async_trait]
 pub trait DelegatingWasiCtx: Send {
-    fn inner(&mut self) -> &mut WasiCtx;
+    fn inner(&mut self) -> &mut WasiP1Ctx;
 
-    async fn args_get(
+    fn args_get(
         &mut self,
         mem: &mut GuestMemory<'_>,
         argv: GuestPtr<GuestPtr<u8>>,
         argv_buf: GuestPtr<u8>,
     ) -> Result<(), Error> {
-        WasiSnapshotPreview1::args_get(self.inner(), mem, argv, argv_buf).await
+        WasiSnapshotPreview1::args_get(self.inner(), mem, argv, argv_buf)
     }
 
-    async fn args_sizes_get(&mut self, mem: &mut GuestMemory<'_>) -> Result<(Size, Size), Error> {
-        WasiSnapshotPreview1::args_sizes_get(self.inner(), mem).await
+    fn args_sizes_get(&mut self, mem: &mut GuestMemory<'_>) -> Result<(Size, Size), Error> {
+        WasiSnapshotPreview1::args_sizes_get(self.inner(), mem)
     }
 
-    async fn environ_get(
+    fn environ_get(
         &mut self,
         mem: &mut GuestMemory<'_>,
         environ: GuestPtr<GuestPtr<u8>>,
         environ_buf: GuestPtr<u8>,
     ) -> Result<(), Error> {
-        WasiSnapshotPreview1::environ_get(self.inner(), mem, environ, environ_buf).await
+        WasiSnapshotPreview1::environ_get(self.inner(), mem, environ, environ_buf)
     }
 
-    async fn environ_sizes_get(
+    fn environ_sizes_get(
         &mut self,
         mem: &mut GuestMemory<'_>,
     ) -> Result<(Size, Size), Error> {
-        WasiSnapshotPreview1::environ_sizes_get(self.inner(), mem).await
+        WasiSnapshotPreview1::environ_sizes_get(self.inner(), mem)
     }
 
-    async fn clock_res_get(
+    fn clock_res_get(
         &mut self,
         mem: &mut GuestMemory<'_>,
         id: Clockid,
     ) -> Result<Timestamp, Error> {
-        WasiSnapshotPreview1::clock_res_get(self.inner(), mem, id).await
+        WasiSnapshotPreview1::clock_res_get(self.inner(), mem, id)
     }
 
-    async fn clock_time_get(
+    fn clock_time_get(
         &mut self,
         mem: &mut GuestMemory<'_>,
         id: Clockid,
         precision: Timestamp,
     ) -> Result<Timestamp, Error> {
-        WasiSnapshotPreview1::clock_time_get(self.inner(), mem, id, precision).await
+        WasiSnapshotPreview1::clock_time_get(self.inner(), mem, id, precision)
     }
 
     async fn fd_advise(
@@ -65,14 +67,14 @@ pub trait DelegatingWasiCtx: Send {
         WasiSnapshotPreview1::fd_advise(self.inner(), mem, fd, offset, len, advice).await
     }
 
-    async fn fd_allocate(
+    fn fd_allocate(
         &mut self,
         mem: &mut GuestMemory<'_>,
         fd: Fd,
         offset: Filesize,
         len: Filesize,
     ) -> Result<(), Error> {
-        WasiSnapshotPreview1::fd_allocate(self.inner(), mem, fd, offset, len).await
+        WasiSnapshotPreview1::fd_allocate(self.inner(), mem, fd, offset, len)
     }
 
     async fn fd_close(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
@@ -87,16 +89,16 @@ pub trait DelegatingWasiCtx: Send {
         WasiSnapshotPreview1::fd_fdstat_get(self.inner(), mem, fd).await
     }
 
-    async fn fd_fdstat_set_flags(
+    fn fd_fdstat_set_flags(
         &mut self,
         mem: &mut GuestMemory<'_>,
         fd: Fd,
         flags: Fdflags,
     ) -> Result<(), Error> {
-        WasiSnapshotPreview1::fd_fdstat_set_flags(self.inner(), mem, fd, flags).await
+        WasiSnapshotPreview1::fd_fdstat_set_flags(self.inner(), mem, fd, flags)
     }
 
-    async fn fd_fdstat_set_rights(
+    fn fd_fdstat_set_rights(
         &mut self,
         mem: &mut GuestMemory<'_>,
         fd: Fd,
@@ -104,7 +106,6 @@ pub trait DelegatingWasiCtx: Send {
         fs_rights_inheriting: Rights,
     ) -> Result<(), Error> {
         WasiSnapshotPreview1::fd_fdstat_set_rights(self.inner(), mem, fd, fs_rights_base, fs_rights_inheriting)
-            .await
     }
 
     async fn fd_filestat_get(
@@ -146,22 +147,22 @@ pub trait DelegatingWasiCtx: Send {
         WasiSnapshotPreview1::fd_pread(self.inner(), mem, fd, iovs, offset).await
     }
 
-    async fn fd_prestat_get(
+    fn fd_prestat_get(
         &mut self,
         mem: &mut GuestMemory<'_>,
         fd: Fd,
     ) -> Result<Prestat, Error> {
-        WasiSnapshotPreview1::fd_prestat_get(self.inner(), mem, fd).await
+        WasiSnapshotPreview1::fd_prestat_get(self.inner(), mem, fd)
     }
 
-    async fn fd_prestat_dir_name(
+    fn fd_prestat_dir_name(
         &mut self,
         mem: &mut GuestMemory<'_>,
         fd: Fd,
         path: GuestPtr<u8>,
         path_len: Size,
     ) -> Result<(), Error> {
-        WasiSnapshotPreview1::fd_prestat_dir_name(self.inner(), mem, fd, path, path_len).await
+        WasiSnapshotPreview1::fd_prestat_dir_name(self.inner(), mem, fd, path, path_len)
     }
 
     async fn fd_pwrite(
@@ -194,13 +195,13 @@ pub trait DelegatingWasiCtx: Send {
         WasiSnapshotPreview1::fd_readdir(self.inner(), mem, fd, buf, buf_len, cookie).await
     }
 
-    async fn fd_renumber(
+    fn fd_renumber(
         &mut self,
         mem: &mut GuestMemory<'_>,
         fd: Fd,
         to: Fd,
     ) -> Result<(), Error> {
-        WasiSnapshotPreview1::fd_renumber(self.inner(), mem, fd, to).await
+        WasiSnapshotPreview1::fd_renumber(self.inner(), mem, fd, to)
     }
 
     async fn fd_seek(
@@ -217,8 +218,8 @@ pub trait DelegatingWasiCtx: Send {
         WasiSnapshotPreview1::fd_sync(self.inner(), mem, fd).await
     }
 
-    async fn fd_tell(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<Filesize, Error> {
-        WasiSnapshotPreview1::fd_tell(self.inner(), mem, fd).await
+    fn fd_tell(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<Filesize, Error> {
+        WasiSnapshotPreview1::fd_tell(self.inner(), mem, fd)
     }
 
     async fn fd_write(
@@ -352,85 +353,56 @@ pub trait DelegatingWasiCtx: Send {
         WasiSnapshotPreview1::poll_oneoff(self.inner(), mem, in_, out, nsubscriptions).await
     }
 
-    async fn proc_exit(&mut self, mem: &mut GuestMemory<'_>, rval: Exitcode) -> anyhow::Error {
-        WasiSnapshotPreview1::proc_exit(self.inner(), mem, rval).await
+    fn proc_exit(&mut self, mem: &mut GuestMemory<'_>, rval: Exitcode) -> anyhow::Error {
+        WasiSnapshotPreview1::proc_exit(self.inner(), mem, rval)
     }
 
-    async fn proc_raise(&mut self, mem: &mut GuestMemory<'_>, sig: Signal) -> Result<(), Error> {
-        WasiSnapshotPreview1::proc_raise(self.inner(), mem, sig).await
+    fn proc_raise(&mut self, mem: &mut GuestMemory<'_>, sig: Signal) -> Result<(), Error> {
+        WasiSnapshotPreview1::proc_raise(self.inner(), mem, sig)
     }
 
-    async fn sched_yield(&mut self, mem: &mut GuestMemory<'_>) -> Result<(), Error> {
-        WasiSnapshotPreview1::sched_yield(self.inner(), mem).await
+    fn sched_yield(&mut self, mem: &mut GuestMemory<'_>) -> Result<(), Error> {
+        WasiSnapshotPreview1::sched_yield(self.inner(), mem)
     }
 
-    async fn random_get(
-        &mut self,
-        mem: &mut GuestMemory<'_>,
-        buf: GuestPtr<u8>,
-        buf_len: Size,
-    ) -> Result<(), Error> {
-        WasiSnapshotPreview1::random_get(self.inner(), mem, buf, buf_len).await
+    fn random_get(&mut self, mem: &mut GuestMemory<'_>, buf: GuestPtr<u8>, buf_len: Size) -> Result<(), Error> {
+        WasiSnapshotPreview1::random_get(self.inner(), mem, buf, buf_len)
     }
 
-    async fn sock_accept(
-        &mut self,
-        mem: &mut GuestMemory<'_>,
-        fd: Fd,
-        flags: Fdflags,
-    ) -> Result<Fd, Error> {
-        WasiSnapshotPreview1::sock_accept(self.inner(), mem, fd, flags).await
+    fn sock_accept(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, flags: Fdflags) -> Result<Fd, Error> {
+        WasiSnapshotPreview1::sock_accept(self.inner(), mem, fd, flags)
     }
 
-    async fn sock_recv(
-        &mut self,
-        mem: &mut GuestMemory<'_>,
-        fd: Fd,
-        ri_data: IovecArray,
-        ri_flags: Riflags,
-    ) -> Result<(Size, Roflags), Error> {
-        WasiSnapshotPreview1::sock_recv(self.inner(), mem, fd, ri_data, ri_flags).await
+    fn sock_recv(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, ri_data: IovecArray, ri_flags: Riflags) -> Result<(Size, Roflags), Error> {
+        WasiSnapshotPreview1::sock_recv(self.inner(), mem, fd, ri_data, ri_flags)
     }
 
-    async fn sock_send(
-        &mut self,
-        mem: &mut GuestMemory<'_>,
-        fd: Fd,
-        si_data: CiovecArray,
-        si_flags: Siflags,
-    ) -> Result<Size, Error> {
-        WasiSnapshotPreview1::sock_send(self.inner(), mem, fd, si_data, si_flags).await
+    fn sock_send(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, si_data: CiovecArray, si_flags: Siflags) -> Result<Size, Error> {
+        WasiSnapshotPreview1::sock_send(self.inner(), mem, fd, si_data, si_flags)
     }
 
-    async fn sock_shutdown(
-        &mut self,
-        mem: &mut GuestMemory<'_>,
-        fd: Fd,
-        how: Sdflags,
-    ) -> Result<(), Error> {
-        WasiSnapshotPreview1::sock_shutdown(self.inner(), mem, fd, how).await
+    fn sock_shutdown(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, how: Sdflags) -> Result<(), Error> {
+        WasiSnapshotPreview1::sock_shutdown(self.inner(), mem, fd, how)
     }
 }
 
-
 pub struct PeridotContext {
-    inner: WasiCtx,
+    inner: WasiP1Ctx,
 }
 
 impl PeridotContext {
-    pub fn new(inner: WasiCtx) -> Self {
+    pub fn new(inner: WasiP1Ctx) -> Self {
         Self { inner }
     }
 }
 
 #[async_trait]
 impl DelegatingWasiCtx for PeridotContext {
-    fn inner(&mut self) -> &mut WasiCtx {
+    fn inner(&mut self) -> &mut WasiP1Ctx {
         &mut self.inner
     }
 }
 
-/// Wrapper que permite implementar `WasiSnapshotPreview1` legalmente.
 pub struct WasiWrapper<T: DelegatingWasiCtx> {
     pub ctx: T,
 }
@@ -443,36 +415,36 @@ impl<T: DelegatingWasiCtx> WasiWrapper<T> {
 
 #[async_trait::async_trait]
 impl<T: DelegatingWasiCtx + Send> WasiSnapshotPreview1 for WasiWrapper<T> {
-    async fn args_get(&mut self, mem: &mut GuestMemory<'_>, argv: GuestPtr<GuestPtr<u8>>, argv_buf: GuestPtr<u8>) -> Result<(), Error> {
-        self.ctx.args_get(mem, argv, argv_buf).await
+    fn args_get(&mut self, mem: &mut GuestMemory<'_>, argv: GuestPtr<GuestPtr<u8>>, argv_buf: GuestPtr<u8>) -> Result<(), Error> {
+        self.ctx.args_get(mem, argv, argv_buf)
     }
 
-    async fn args_sizes_get(&mut self, mem: &mut GuestMemory<'_>) -> Result<(Size, Size), Error> {
-        self.ctx.args_sizes_get(mem).await
+    fn args_sizes_get(&mut self, mem: &mut GuestMemory<'_>) -> Result<(Size, Size), Error> {
+        self.ctx.args_sizes_get(mem)
     }
 
-    async fn environ_get(&mut self, mem: &mut GuestMemory<'_>, environ: GuestPtr<GuestPtr<u8>>, environ_buf: GuestPtr<u8>) -> Result<(), Error> {
-        self.ctx.environ_get(mem, environ, environ_buf).await
+    fn environ_get(&mut self, mem: &mut GuestMemory<'_>, environ: GuestPtr<GuestPtr<u8>>, environ_buf: GuestPtr<u8>) -> Result<(), Error> {
+        self.ctx.environ_get(mem, environ, environ_buf)
     }
 
-    async fn environ_sizes_get(&mut self, mem: &mut GuestMemory<'_>) -> Result<(Size, Size), Error> {
-        self.ctx.environ_sizes_get(mem).await
+    fn environ_sizes_get(&mut self, mem: &mut GuestMemory<'_>) -> Result<(Size, Size), Error> {
+        self.ctx.environ_sizes_get(mem)
     }
 
-    async fn clock_res_get(&mut self, mem: &mut GuestMemory<'_>, id: Clockid) -> Result<Timestamp, Error> {
-        self.ctx.clock_res_get(mem, id).await
+    fn clock_res_get(&mut self, mem: &mut GuestMemory<'_>, id: Clockid) -> Result<Timestamp, Error> {
+        self.ctx.clock_res_get(mem, id)
     }
 
-    async fn clock_time_get(&mut self, mem: &mut GuestMemory<'_>, id: Clockid, precision: Timestamp) -> Result<Timestamp, Error> {
-        self.ctx.clock_time_get(mem, id, precision).await
+    fn clock_time_get(&mut self, mem: &mut GuestMemory<'_>, id: Clockid, precision: Timestamp) -> Result<Timestamp, Error> {
+        self.ctx.clock_time_get(mem, id, precision)
     }
 
     async fn fd_advise(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, offset: Filesize, len: Filesize, advice: Advice) -> Result<(), Error> {
         self.ctx.fd_advise(mem, fd, offset, len, advice).await
     }
 
-    async fn fd_allocate(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, offset: Filesize, len: Filesize) -> Result<(), Error> {
-        self.ctx.fd_allocate(mem, fd, offset, len).await
+    fn fd_allocate(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, offset: Filesize, len: Filesize) -> Result<(), Error> {
+        self.ctx.fd_allocate(mem, fd, offset, len)
     }
 
     async fn fd_close(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
@@ -487,12 +459,12 @@ impl<T: DelegatingWasiCtx + Send> WasiSnapshotPreview1 for WasiWrapper<T> {
         self.ctx.fd_fdstat_get(mem, fd).await
     }
 
-    async fn fd_fdstat_set_flags(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, flags: Fdflags) -> Result<(), Error> {
-        self.ctx.fd_fdstat_set_flags(mem, fd, flags).await
+    fn fd_fdstat_set_flags(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, flags: Fdflags) -> Result<(), Error> {
+        self.ctx.fd_fdstat_set_flags(mem, fd, flags)
     }
 
-    async fn fd_fdstat_set_rights(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, fs_rights_base: Rights, fs_rights_inheriting: Rights) -> Result<(), Error> {
-        self.ctx.fd_fdstat_set_rights(mem, fd, fs_rights_base, fs_rights_inheriting).await
+    fn fd_fdstat_set_rights(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, fs_rights_base: Rights, fs_rights_inheriting: Rights) -> Result<(), Error> {
+        self.ctx.fd_fdstat_set_rights(mem, fd, fs_rights_base, fs_rights_inheriting)
     }
 
     async fn fd_filestat_get(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<Filestat, Error> {
@@ -511,12 +483,12 @@ impl<T: DelegatingWasiCtx + Send> WasiSnapshotPreview1 for WasiWrapper<T> {
         self.ctx.fd_pread(mem, fd, iovs, offset).await
     }
 
-    async fn fd_prestat_get(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<Prestat, Error> {
-        self.ctx.fd_prestat_get(mem, fd).await
+    fn fd_prestat_get(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<Prestat, Error> {
+        self.ctx.fd_prestat_get(mem, fd)
     }
 
-    async fn fd_prestat_dir_name(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, path: GuestPtr<u8>, path_len: Size) -> Result<(), Error> {
-        self.ctx.fd_prestat_dir_name(mem, fd, path, path_len).await
+    fn fd_prestat_dir_name(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, path: GuestPtr<u8>, path_len: Size) -> Result<(), Error> {
+        self.ctx.fd_prestat_dir_name(mem, fd, path, path_len)
     }
 
     async fn fd_pwrite(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: CiovecArray, offset: Filesize) -> Result<Size, Error> {
@@ -531,8 +503,8 @@ impl<T: DelegatingWasiCtx + Send> WasiSnapshotPreview1 for WasiWrapper<T> {
         self.ctx.fd_readdir(mem, fd, buf, buf_len, cookie).await
     }
 
-    async fn fd_renumber(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, to: Fd) -> Result<(), Error> {
-        self.ctx.fd_renumber(mem, fd, to).await
+    fn fd_renumber(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, to: Fd) -> Result<(), Error> {
+        self.ctx.fd_renumber(mem, fd, to)
     }
 
     async fn fd_seek(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, offset: Filedelta, whence: Whence) -> Result<Filesize, Error> {
@@ -543,8 +515,8 @@ impl<T: DelegatingWasiCtx + Send> WasiSnapshotPreview1 for WasiWrapper<T> {
         self.ctx.fd_sync(mem, fd).await
     }
 
-    async fn fd_tell(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<Filesize, Error> {
-        self.ctx.fd_tell(mem, fd).await
+    fn fd_tell(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<Filesize, Error> {
+        self.ctx.fd_tell(mem, fd)
     }
 
     async fn fd_write(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: CiovecArray) -> Result<Size, Error> {
@@ -595,68 +567,42 @@ impl<T: DelegatingWasiCtx + Send> WasiSnapshotPreview1 for WasiWrapper<T> {
         self.ctx.poll_oneoff(mem, in_, out, nsubscriptions).await
     }
 
-    async fn proc_exit(&mut self, mem: &mut GuestMemory<'_>, rval: Exitcode) -> anyhow::Error {
-        self.ctx.proc_exit(mem, rval).await
+    fn proc_exit(&mut self, mem: &mut GuestMemory<'_>, rval: Exitcode) -> anyhow::Error {
+        self.ctx.proc_exit(mem, rval)
     }
 
-    async fn proc_raise(&mut self, mem: &mut GuestMemory<'_>, sig: Signal) -> Result<(), Error> {
-        self.ctx.proc_raise(mem, sig).await
+    fn proc_raise(&mut self, mem: &mut GuestMemory<'_>, sig: Signal) -> Result<(), Error> {
+        self.ctx.proc_raise(mem, sig)
     }
 
-    async fn sched_yield(&mut self, mem: &mut GuestMemory<'_>) -> Result<(), Error> {
-        self.ctx.sched_yield(mem).await
+    fn sched_yield(&mut self, mem: &mut GuestMemory<'_>) -> Result<(), Error> {
+        self.ctx.sched_yield(mem)
     }
 
-    async fn random_get(&mut self, mem: &mut GuestMemory<'_>, buf: GuestPtr<u8>, buf_len: Size) -> Result<(), Error> {
-        self.ctx.random_get(mem, buf, buf_len).await
+    fn random_get(&mut self, mem: &mut GuestMemory<'_>, buf: GuestPtr<u8>, buf_len: Size) -> Result<(), Error> {
+        self.ctx.random_get(mem, buf, buf_len)
     }
 
-    async fn sock_accept(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, flags: Fdflags) -> Result<Fd, Error> {
-        self.ctx.sock_accept(mem, fd, flags).await
+    fn sock_accept(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, flags: Fdflags) -> Result<Fd, Error> {
+        self.ctx.sock_accept(mem, fd, flags)
     }
 
-    async fn sock_recv(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, ri_data: IovecArray, ri_flags: Riflags) -> Result<(Size, Roflags), Error> {
-        self.ctx.sock_recv(mem, fd, ri_data, ri_flags).await
+    fn sock_recv(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, ri_data: IovecArray, ri_flags: Riflags) -> Result<(Size, Roflags), Error> {
+        self.ctx.sock_recv(mem, fd, ri_data, ri_flags)
     }
 
-    async fn sock_send(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, si_data: CiovecArray, si_flags: Siflags) -> Result<Size, Error> {
-        self.ctx.sock_send(mem, fd, si_data, si_flags).await
+    fn sock_send(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, si_data: CiovecArray, si_flags: Siflags) -> Result<Size, Error> {
+        self.ctx.sock_send(mem, fd, si_data, si_flags)
     }
 
-    async fn sock_shutdown(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, how: Sdflags) -> Result<(), Error> {
-        self.ctx.sock_shutdown(mem, fd, how).await
+    fn sock_shutdown(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, how: Sdflags) -> Result<(), Error> {
+        self.ctx.sock_shutdown(mem, fd, how)
     }
 }
 
-#[macro_export]
-macro_rules! define_wasi {
-    ($async_mode:tt $($bounds:tt)*) => {
-
-    use wasmtime::Linker;
-
-    pub fn add_to_linker<T, U>(
-        linker: &mut Linker<T>,
-        get_cx: impl Fn(&mut T) -> &mut U + Send + Sync + Copy + 'static,
-    ) -> anyhow::Result<()>
-        where U: Send
-                    + wasi_common::snapshots::preview_1::wasi_snapshot_preview1::WasiSnapshotPreview1,
-            $($bounds)*
-    {
-        snapshots::preview_1::add_wasi_snapshot_preview1_to_linker(linker, get_cx)?;
-        Ok(())
-    }
-
-    pub mod snapshots {
-        pub mod preview_1 {
-            wiggle::wasmtime_integration!({
-                // The wiggle code to integrate with lives here:
-                target: wasi_common::snapshots::preview_1,
-                witx: ["$CARGO_MANIFEST_DIR/witx/wasi_snapshot_preview1.witx"],
-                errors: { errno => trappable Error },
-                $async_mode: *
-            });
-        }
-    }
-}}
-
-define_wasi!(block_on);
+pub fn add_to_linker<T: Send + 'static>(
+    linker: &mut wasmtime::Linker<T>,
+    f: impl Fn(&mut T) -> &mut WasiP1Ctx + Copy + Send + Sync + 'static,
+) -> anyhow::Result<()> {
+    wasi_snapshot_preview1::add_to_linker(linker, f)
+}

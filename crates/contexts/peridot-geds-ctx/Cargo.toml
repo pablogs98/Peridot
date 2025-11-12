@@ -5,10 +5,11 @@ authors.workspace = true
 edition.workspace = true
 
 [dependencies]
+peridot = { workspace = true }
 wiggle = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-wasi-common = { workspace = true }
 wasmtime = { workspace = true }
+wasmtime-wasi = { workspace = true }
 log = { workspace = true }
 # geds_rs = { path = "/usr/local/rust" }

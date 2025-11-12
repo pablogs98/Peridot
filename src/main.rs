@@ -9,7 +9,6 @@ use nix::unistd::{fork, ForkResult};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use std::{env, fs, process, thread};
-use wasi_common::sync::{Dir, WasiCtxBuilder};
 use wasmtime::{Engine, Linker, Module, Store, Result};
 
 #[cfg(feature = "token")]
@@ -22,9 +21,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "token")]
 use std::os::unix::net::{UnixListener, UnixStream};
+use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 use peridot::conf::PeridotConfig;
+use peridot::context::{PeridotContext, WasiWrapper};
 #[cfg(feature = "token")]
 use peridot::token::TokenBucket;
+#[cfg(feature = "counter")]
+use peridot_counter_ctx::PeridotCounterCtx;
+use peridot_s3_ctx::PeridotS3Ctx;
 
 /// Peridot - Transparent Integration of new logic in legacy Wasm modules
 #[derive(Parser, Debug)]
@@ -46,7 +50,7 @@ struct Args {
 
 fn run_module(
     module_path: &str,
-    args: &[String],
+    args: &Vec<String>,
     _i: usize,
     _overseer_address: &Option<String>,
     _demand: f64,
@@ -55,17 +59,19 @@ fn run_module(
     let engine = Engine::default();
     let mut linker = Linker::new(&engine);
 
-    info!("Args {:?}", args);
-
     // Set up WASI
+    println!("Module path: {}", module_path);
+    let module_dir = Path::new(module_path).parent().unwrap();
+    println!("Module dir: {}",module_dir.display());
+
     let wasi = WasiCtxBuilder::new()
         .inherit_stdio()
         .preopened_dir(
-            Dir::from_std_file(fs::File::open(Path::new(module_path).parent().unwrap())?),
-            Path::new(module_path).parent().unwrap(),
-        )?
-        .args(args)?
-        .build();
+        module_dir,
+        ".",
+        DirPerms::all(),
+        FilePerms::all(),
+    )?.args(args).build_p1();
 
     #[cfg(feature = "token")]
     {
@@ -74,15 +80,17 @@ fn run_module(
         let peridot_ctx = peridot_token_ctx::PeridotTokenCtx::new(wasi, token_bucket.clone());
     }
     #[cfg(feature = "geds")]
-    let peridot_ctx = peridot_geds_ctx::PeridotGEDSCtx::new(wasi);
+    let peridot_ctx = PeridotGEDSCtx::new(PeridotContext::new(wasi));
     #[cfg(feature = "clock")]
-    let peridot_ctx = peridot_clock_ctx::PeridotClockCtx::new(wasi);
+    let peridot_ctx = PeridotClockCtx::new(PeridotContext::new(wasi));
     #[cfg(feature = "counter")]
-    let peridot_ctx = peridot_counter_ctx::PeridotCounterCtx::new(wasi);
+    let peridot_ctx = PeridotCounterCtx::new(PeridotContext::new(wasi));
     #[cfg(feature = "s3")]
-    let peridot_ctx = peridot_s3_ctx::PeridotS3Ctx::new(wasi);
+    let peridot_ctx = PeridotS3Ctx::new(PeridotContext::new(wasi));
 
-    let mut store = Store::new(&engine, peridot_ctx);
+    let wrapped_ctx = WasiWrapper::new(peridot_ctx);
+
+    let mut store = Store::new(&engine, wrapped_ctx);
 
     linker.allow_shadowing(true);
 
@@ -195,9 +203,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config: Vec<_> = config.into_iter().collect();
     config.sort_by(|a, b| {
         a.1.peridot_config
-            .get("priority")
-            .unwrap()
-            .partial_cmp(b.1.peridot_config.get("priority").unwrap())
+            .priority
+            .partial_cmp(&b.1.peridot_config.priority)
             .unwrap()
     });
 
@@ -209,7 +216,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &module_config.args,
                     children.len(),
                     overseer_address,
-                    *module_config.peridot_config.get("demand").unwrap(),
+                    module_config.peridot_config.demand,
                 ) {
                     eprintln!("Error running module \"{}\": {}", &module_path, e);
                     process::exit(1);

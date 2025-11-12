@@ -9,8 +9,9 @@ use aws_sdk_s3::primitives::ByteStream;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use wasi_common::snapshots::preview_1::types::*;
-use wasi_common::Error;
+use wasmtime_wasi::p1::types::{Error, Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta, Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights, Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence};
+use wasmtime_wasi::p1::wasi_snapshot_preview1::WasiSnapshotPreview1;
+use wasmtime_wasi::p1::WasiP1Ctx;
 use wiggle::{GuestError, GuestMemory, GuestPtr};
 use peridot::context::{DelegatingWasiCtx, PeridotContext};
 
@@ -124,7 +125,7 @@ impl PeridotS3Ctx {
 
 #[async_trait]
 impl DelegatingWasiCtx for PeridotS3Ctx {
-    fn inner(&mut self) -> &mut wasi_common::WasiCtx {
+    fn inner(&mut self) -> &mut WasiP1Ctx {
         self.base.inner()
     }
 

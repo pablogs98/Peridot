@@ -5,9 +5,10 @@ authors.workspace = true
 edition.workspace = true
 
 [dependencies]
+peridot = { workspace = true }
+wasmtime-wasi = { workspace = true }
 wiggle = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-wasi-common = { workspace = true }
 wasmtime = { workspace = true }
 log = { workspace = true }
