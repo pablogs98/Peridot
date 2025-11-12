@@ -1,0 +1,16 @@
+[package]
+name = "peridot-s3-ctx"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+wiggle = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+wasi-common = { workspace = true }
+wasmtime = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }
+aws-sdk-s3 = {workspace = true}
+aws-config = { workspace = true, features = ["behavior-version-latest"] }

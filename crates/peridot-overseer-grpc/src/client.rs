@@ -1,11 +1,8 @@
-use crate::client::overseer::RemoveModuleRequest;
-use hyper_util::rt::TokioIo;
-use overseer::{overseer_client::OverseerClient, RegisterModuleRequest, UpdateMaxBandwidthRequest};
+use crate::client::overseer::{RemoveModuleRequest, UpdateMetricsRequest};
+use overseer::{overseer_client::OverseerClient, RegisterModuleRequest};
 use std::collections::HashMap;
-use tokio::net::UnixStream;
+use std::error::Error;
 use tokio::runtime::Runtime;
-use tonic::transport::{Endpoint, Uri};
-use tower::service_fn;
 
 pub mod overseer {
     tonic::include_proto!("overseer");
@@ -16,31 +13,18 @@ pub struct OverseerGrpcClient {
 }
 
 impl OverseerGrpcClient {
-    pub fn new(address: &str) -> OverseerGrpcClient {
+    pub async fn new(address: &str) -> Result<OverseerGrpcClient, Box<dyn Error>> {
         let runtime = Runtime::new().unwrap();
         let address_owned = address.to_owned();
-        let channel = runtime
-            .block_on(
-                Endpoint::try_from("http://[::]:50051")
-                    .unwrap()
-                    .connect_with_connector(service_fn(move |_: Uri| {
-                        let address = address_owned.clone();
-                        async move {
-                            Ok::<_, std::io::Error>(TokioIo::new(
-                                UnixStream::connect(address).await?,
-                            ))
-                        }
-                    })),
-            )
-            .unwrap();
-        OverseerGrpcClient {
-            client: OverseerClient::new(channel),
+
+        Ok(OverseerGrpcClient {
+            client: OverseerClient::connect(address_owned).await?,
             runtime,
-        }
+        })
     }
 
-    pub fn register_module(&mut self, pid: u32, demand: f64) -> Result<(), tonic::Status> {
-        let register_request = tonic::Request::new(RegisterModuleRequest { pid, demand });
+    pub fn register_module(&mut self, module_id: &String, demand: f64) -> Result<(), tonic::Status> {
+        let register_request = tonic::Request::new(RegisterModuleRequest { module_id: module_id.clone(), demand });
         let result = self
             .runtime
             .block_on(self.client.register_module(register_request));
@@ -50,19 +34,19 @@ impl OverseerGrpcClient {
         }
     }
 
-    pub fn update_max_bandwidth(&mut self, pids: Vec<u32>) -> HashMap<u32, f64> {
-        let stats_request = tonic::Request::new(UpdateMaxBandwidthRequest { pids });
+    pub fn update_metrics(&mut self, module_id: &String, metrics: HashMap<String, f64>) -> HashMap<String, f64> {
+        let stats_request = tonic::Request::new(UpdateMetricsRequest { module_id: module_id.clone(), metrics });
         let result = self
             .runtime
-            .block_on(self.client.update_max_bandwidth(stats_request));
+            .block_on(self.client.update_metrics(stats_request));
         match result {
-            Ok(response) => response.into_inner().stats,
+            Ok(response) => response.into_inner().metrics,
             Err(_) => HashMap::new(),
         }
     }
 
-    pub fn remove_module(&mut self, pid: u32) -> Result<(), tonic::Status> {
-        let remove_request = tonic::Request::new(RemoveModuleRequest { pid });
+    pub fn remove_module(&mut self, module_id: &String) -> Result<(), tonic::Status> {
+        let remove_request = tonic::Request::new(RemoveModuleRequest { module_id: module_id.clone() });
         let result = self
             .runtime
             .block_on(self.client.remove_module(remove_request));

@@ -1,0 +1,21 @@
+[package]
+name = "peridot-batch-ctx"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+rand = "0.8.5"
+arrow = "50.0.0"
+parquet = "50.0.0"
+chrono = "=0.4.31"
+
+wiggle = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+wasi-common = { workspace = true }
+wasmtime = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }
+aws-sdk-s3 = {workspace = true}
+aws-config = { workspace = true, features = ["behavior-version-latest"] }

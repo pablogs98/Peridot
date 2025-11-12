@@ -1,0 +1,14 @@
+[package]
+name = "peridot-syscall-batching-ctx"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+wiggle = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+wasi-common = {workspace = true}
+wasmtime = { workspace = true }
+log = { workspace = true }
+impl-tools = "0.10.3"
