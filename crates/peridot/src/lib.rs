@@ -7,5 +7,8 @@ pub mod conf;
 /// Token bucket implementation for I/O rate limiting in Peridot.
 pub mod token;
 
+///
+pub mod context;
+
 /// Metrics module for Peridot. Handles collection and reporting of system and application metrics.
 pub mod metrics;

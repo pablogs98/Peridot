@@ -31,7 +31,6 @@ name = "peridot"
 path = "src/main.rs"
 
 [workspace.dependencies]
-wasi-common = { path = "crates/wasi-common-29.0.1", version = "29.0.1" }
 peridot = { path = "crates/peridot", version = "0.1.0" }
 peridot-overseer-grpc = { path = "crates/peridot-overseer-grpc" , version = "0.1.0" }
 

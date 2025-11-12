@@ -12,5 +12,6 @@ wasi-common = { workspace = true }
 wasmtime = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true }
+peridot = { path = "../peridot" }
 aws-sdk-s3 = {workspace = true}
 aws-config = { workspace = true, features = ["behavior-version-latest"] }

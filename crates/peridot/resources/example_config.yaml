@@ -1,5 +1,5 @@
-path/to/module:
-    args: [test, args]
+/home/lubrae/phd/wasm/Peridot/crates/imagenet-preprocessing/imagenet-preprocessing.wasm:
+    args: [true, 2]
     peridot_config:
         demand: 1024    # B/s
 
