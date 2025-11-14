@@ -19,6 +19,7 @@ use wasmtime::component::{self, Component, ResourceTable};
 use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::WasiCtxBuilder;
+use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher};
 use peridot_token_ctx::PeridotTokenCtx;
 
 pub struct PeridotShim;
@@ -27,7 +28,7 @@ pub struct PeridotCompiler(Engine);
 
 pub struct PeridotSandbox {
     engine: Engine,
-    metrics_publisher: Option<peridot::metrics::MetricsPublisher>,
+    metrics_publisher: Option<MetricsPublisher>,
     cancel: CancellationToken,
 }
 
@@ -41,7 +42,7 @@ impl Default for PeridotSandbox {
                 .context("Failed to create wasmtime engine")
                 .unwrap(),
             cancel: CancellationToken::new(),
-            metrics_publisher: Some(peridot::metrics::MetricsPublisher::new(vec![])),
+            metrics_publisher: Some(MetricsPublisher::new(vec![], vec![])),
         }
     }
 }
@@ -76,6 +77,9 @@ impl Sandbox for PeridotSandbox {
 
         let peridot_config =
             peridot::conf::PeridotConfig::new("/peridot_config.yaml").into_error_code();
+
+        // Subscribe metrics producers and start metrics update thread
+        self.metrics_publisher.unwrap().subscribe_producer(DiskIOMetricsProducer{});
 
         self.metrics_publisher
             .unwrap()

@@ -7,6 +7,19 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::{fs, thread, time};
 use uuid::Uuid;
 
+/// [MetricsSubscriber] is a trait that defines the behavior of an object that can receive metric updates.
+/// [MetricsSubscriber]s subscribe to a [MetricsPublisher] to receive updates.
+pub trait MetricsSubscriber {
+    /// Updates the subscriber with the given metrics.
+    fn update(&mut self, metrics: &HashMap<String, f64>);
+}
+
+/// [MetricsProducer] is a trait that defines the behavior of an object that can produce metrics.
+/// [MetricsProducer]s can be registered with a [MetricsPublisher] to provide additional metrics
+pub trait MetricsProducer {
+    fn produce(&self, metrics: &mut HashMap<String, f64>);
+}
+
 ///
 /// [MetricsPublisher] is responsible for collecting metrics from and sending metrics to the Overseer,
 /// and notifying subscribers about metric updates.
@@ -85,8 +98,6 @@ impl MetricsPublisher {
                             producer.produce(&mut gathered_metrics);
                         }
 
-                        MetricsPublisher::update_disk_metrics(&mut gathered_metrics);
-
                         let received_metrics = client.update_metrics(&module_id, gathered_metrics);
                         if !received_metrics.is_empty() {
                             let subs = subscribers.read().unwrap();
@@ -135,8 +146,12 @@ impl MetricsPublisher {
             return;
         }
     }
+}
 
-    fn update_disk_metrics(metrics_map: &mut HashMap<String, f64>) {
+pub struct DiskIOMetricsProducer;
+
+impl MetricsProducer for DiskIOMetricsProducer {
+    fn produce(&self, metrics: &mut HashMap<String, f64>) {
         let pid = std::process::id();
         let path = format!("/proc/{}/io", pid);
         let mut values: HashMap<&str, u64> = HashMap::new();
@@ -151,26 +166,13 @@ impl MetricsPublisher {
             }
         }
 
-        metrics_map.insert(
+        metrics.insert(
             "read_bytes".to_string(),
             *values.get("read_bytes").unwrap_or(&0) as f64,
         );
-        metrics_map.insert(
+        metrics.insert(
             "write_bytes".to_string(),
             *values.get("write_bytes").unwrap_or(&0) as f64,
         );
     }
-}
-
-/// [MetricsSubscriber] is a trait that defines the behavior of an object that can receive metric updates.
-/// [MetricsSubscriber]s subscribe to a [MetricsPublisher] to receive updates.
-pub trait MetricsSubscriber {
-    /// Updates the subscriber with the given metrics.
-    fn update(&mut self, metrics: &HashMap<String, f64>);
-}
-
-/// [MetricsProducer] is a trait that defines the behavior of an object that can produce metrics.
-/// [MetricsProducer]s can be registered with a [MetricsPublisher] to provide additional metrics
-pub trait MetricsProducer {
-    fn produce(&self, metrics: &mut HashMap<String, f64>);
 }
