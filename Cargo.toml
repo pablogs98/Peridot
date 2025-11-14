@@ -31,7 +31,6 @@ name = "peridot"
 path = "src/main.rs"
 
 [workspace.dependencies]
-wasi-common = { path = "crates/wasi-common-29.0.1", version = "29.0.1" }
 peridot = { path = "crates/peridot", version = "0.1.0" }
 peridot-overseer-grpc = { path = "crates/peridot-overseer-grpc" , version = "0.1.0" }
 
@@ -59,7 +58,6 @@ peridot-s3-ctx = { path = "crates/contexts/peridot-s3-ctx", optional = true }
 peridot-counter-ctx = { path = "crates/contexts/peridot-counter-ctx", optional = true }
 
 wasmtime = { workspace = true }
-wasi-common = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }

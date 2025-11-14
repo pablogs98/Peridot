@@ -19,6 +19,7 @@ use wasmtime::component::{self, Component, ResourceTable};
 use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::WasiCtxBuilder;
+use peridot_token_ctx::PeridotTokenCtx;
 
 pub struct PeridotShim;
 
@@ -153,9 +154,9 @@ impl PeridotSandbox {
         )));
 
         #[cfg(feature = "token")]
-        let peridot_ctx = peridot_token_ctx::PeridotTokenCtx::new(ctx_p1, Arc::clone(&token_bucket));
+        let peridot_ctx = PeridotTokenCtx::new(ctx_p1, Arc::clone(&token_bucket));
 
-        peridot_token_ctx::add_to_linker_async(&mut module_linker, |wasi_ctx: &mut WasiP1Ctx| {
+        peridot_token_ctx::add_to_linker_async(&mut module_linker, |wasi_ctx: &mut PeridotTokenCtx| {
             wasi_ctx
         })?;
 
