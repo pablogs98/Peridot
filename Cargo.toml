@@ -12,10 +12,10 @@ members = [
     "crates/peridot",
     "crates/contexts/peridot-clock-ctx",
     "crates/contexts/peridot-geds-ctx",
-    "crates/peridot-plugin-interface",
     "crates/peridot-overseer",
     "crates/peridot-overseer-grpc",
     "crates/contexts/peridot-s3-ctx",
+    "crates/contexts/peridot-batch-ctx",
     "crates/contexts/peridot-syscall-batching-ctx",
     "crates/contexts/peridot-token-ctx",
     "crates/contexts/peridot-counter-ctx"
@@ -56,12 +56,14 @@ peridot-geds-ctx = { path = "crates/contexts/peridot-geds-ctx", optional = true 
 peridot-clock-ctx = { path = "crates/contexts/peridot-clock-ctx", optional = true }
 peridot-s3-ctx = { path = "crates/contexts/peridot-s3-ctx", optional = true }
 peridot-counter-ctx = { path = "crates/contexts/peridot-counter-ctx", optional = true }
+wasmtime-wasi = { workspace = true }
 
 wasmtime = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 peridot = { workspace = true }
+tokio = "1.48.0"
 
 [features]
 token = ["dep:peridot-token-ctx"]

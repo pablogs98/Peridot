@@ -5,7 +5,12 @@ authors.workspace = true
 edition.workspace = true
 
 [dependencies]
+peridot = { workspace = true }
 wiggle = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+wasmtime-wasi = {workspace = true}
 wasmtime = { workspace = true }
+log = { workspace = true }
+impl-tools = "0.10.3"
+wasmtime-wasi-io = "38.0.4"

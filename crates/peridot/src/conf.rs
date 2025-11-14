@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
@@ -21,10 +22,24 @@ pub struct CpuConfig {
     pub utilization: f64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ModuleConfig {
+    pub args: Vec<String>,
+    pub peridot_config: PeridotConfigInner,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PeridotConfigInner {
+    pub priority: u32,
+    pub demand: f64,
+}
+
+type ConfigMap = HashMap<String, ModuleConfig>;
+
 impl PeridotConfig {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<PeridotConfig, Box<dyn std::error::Error>> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<ConfigMap, Box<dyn std::error::Error>> {
         let contents = fs::read_to_string(path)?;
-        let config: PeridotConfig = serde_yaml::from_str(&contents)?;
+        let config: ConfigMap = serde_yaml::from_str(&contents)?;
         Ok(config)
     }
 }

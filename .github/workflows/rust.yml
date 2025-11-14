@@ -19,6 +19,6 @@ jobs:
     - name: Setup protoc
       uses: arduino/setup-protoc@v3.0.0
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --verbose --features peridot-token-ctx
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose --features peridot-token-ctx

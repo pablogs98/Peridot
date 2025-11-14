@@ -6,11 +6,10 @@ edition.workspace = true
 
 [dependencies]
 wiggle = { workspace = true }
-anyhow = { workspace = true }
 async-trait = { workspace = true }
-
-wasmtime = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true }
+peridot = { workspace = true}
 aws-sdk-s3 = {workspace = true}
 aws-config = { workspace = true, features = ["behavior-version-latest"] }
+wasmtime-wasi = {workspace = true}
