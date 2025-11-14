@@ -1,0 +1,322 @@
+use geds_rs::{GEDSFile, GEDS};
+use log::{error, info};
+use std::collections::BTreeMap;
+use std::ops::{Deref, DerefMut};
+use async_trait::async_trait;
+use wasmtime_wasi::p1::types::{CiovecArray, Errno, Error, Fd, Fdflags, Filesize, IovecArray, Lookupflags, Oflags, Rights, Size};
+use wasmtime_wasi::p1::wasi_snapshot_preview1::WasiSnapshotPreview1;
+use wasmtime_wasi::p1::{wasi_snapshot_preview1, WasiP1Ctx};
+use wiggle::{GuestError, GuestMemory, GuestPtr};
+use peridot::context::{DelegatingWasiCtx, PeridotContext};
+
+
+#[derive(Default)]
+struct GEDSDescriptors {
+    used: BTreeMap<u32, GEDSFile>,
+    free: Vec<u32>,
+}
+
+impl Deref for GEDSDescriptors {
+    type Target = BTreeMap<u32, GEDSFile>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.used
+    }
+}
+
+impl DerefMut for GEDSDescriptors {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.used
+    }
+}
+
+impl GEDSDescriptors {
+    fn new() -> GEDSDescriptors {
+        let descriptors = Self::default();
+        descriptors
+    }
+
+    /// Returns next descriptor number, which was never assigned
+    fn unused(&self) -> Result<u32, ()> {
+        match self.last_key_value() {
+            Some((fd, _)) => {
+                if let Some(fd) = fd.checked_add(1) {
+                    return Ok(fd);
+                }
+                if self.len() == u32::MAX as usize {
+                    return Err(());
+                }
+                // TODO: Optimize
+                Ok((8192..u32::MAX)
+                    .rev()
+                    .find(|fd| !self.contains_key(fd))
+                    .expect("failed to find an unused file descriptor"))
+            }
+            None => Ok(0),
+        }
+    }
+
+    fn remove(&mut self, fd: Fd) -> Option<GEDSFile> {
+        let fd = fd.into();
+        let desc = self.used.remove(&fd)?;
+        self.free.push(fd);
+        Some(desc)
+    }
+
+    /// Pushes the [Descriptor] returning corresponding number.
+    /// This operation will try to reuse numbers previously removed via [`Self::remove`]
+    /// and rely on [`Self::unused`] if no free numbers are recorded
+    fn push(&mut self, desc: GEDSFile) -> Result<u32, ()> {
+        let fd = if let Some(fd) = self.free.pop() {
+            fd
+        } else {
+            self.unused()?
+        };
+        assert!(self.insert(fd, desc).is_none());
+        Ok(fd)
+    }
+}
+
+pub struct PeridotGEDSCtx {
+    inner: PeridotContext,
+    geds: Option<GEDS>,
+    geds_descriptors: GEDSDescriptors,
+}
+impl PeridotGEDSCtx {
+    pub fn new(inner: PeridotContext) -> Self {
+        let mut config = GEDS::get_default_config();
+        config.pub_sub_enabled = true;
+        config.cache_objects_from_s3 = true;
+        let geds = GEDS::new(&config);
+        let mut opt = None;
+        if let Err(e) = geds.start() {
+            error!(
+                "Error starting GEDS: {}. Falling back to local filesystem.",
+                e
+            );
+        } else {
+            if let Err(e) = geds.register_object_store_config(
+                "geds-default",
+                std::env::var("S3_ENDPOINT").unwrap().as_str(),
+                std::env::var("S3_ACCESS_KEY").unwrap().as_str(),
+                std::env::var("S3_SECRET_KEY").unwrap().as_str(),
+            ) {
+                error!("Error registering GEDS S3 config: {}", e);
+            } else {
+                info!("GEDS S3 config registered");
+            }
+            opt = Some(geds);
+        }
+        info!("Initialization complete!");
+        Self {
+            inner,
+            geds: opt,
+            geds_descriptors: GEDSDescriptors::new(),
+        }
+    }
+}
+
+
+#[async_trait]
+impl DelegatingWasiCtx for PeridotGEDSCtx {
+    fn inner(&mut self) -> &mut WasiP1Ctx {
+        self.inner.inner()
+    }
+    
+    async fn fd_close(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
+        println!("Closing file");
+        if self.geds_descriptors.contains_key(&u32::from(fd)) {
+            println!("Closing GEDS file");
+            self.geds_descriptors.remove(fd);
+            self.geds.as_ref().unwrap().relocate(true);
+             return Ok(());
+        }
+        self.inner.fd_close(mem, fd).await
+    }
+
+    async fn fd_datasync(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
+        if self.geds_descriptors.contains_key(&u32::from(fd)) {
+            println!("Datasyinncccc");
+            self.geds.as_ref().unwrap().relocate(true);
+            return Ok(());
+        }
+        self.inner.fd_datasync(mem, fd).await
+    }
+    
+    async fn fd_pread(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        iovs: IovecArray,
+        offset: Filesize,
+    ) -> Result<Size, Error> {
+        if self.geds_descriptors.contains_key(&u32::from(fd)) {
+            let geds_file = self.geds_descriptors.get(&u32::from(fd)).unwrap();
+            let mut buf: Vec<u8> = vec![0; iovs.len() as usize];
+            let len = buf.len();
+            return match geds_file.read(&mut buf, offset.try_into().unwrap(), len)
+            {
+                Ok(size) => Ok(u32::try_from(size)?),
+                Err(e) => {
+                    error!("Error reading file: {}", e);
+                    Err(Errno::Badf.into())
+                }
+            };
+        }
+        self.inner.fd_pread(mem, fd, iovs, offset).await
+    }
+
+    async fn fd_pwrite(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        iovs: CiovecArray,
+        offset: Filesize,
+    ) -> Result<Size, Error> {
+        if self.geds_descriptors.contains_key(&u32::from(fd)) {
+            let geds_file = self.geds_descriptors.get(&u32::from(fd)).unwrap();
+            let buf = first_non_empty_ciovec(mem, iovs)?;
+            let buf = mem.to_vec(buf)?;
+
+            return match geds_file.write(&buf, 0, buf.len()) {
+                Ok(()) => Ok(u32::try_from(buf.len())?),
+                Err(e) => {
+                    println!("Error fd_write: {}", e);
+                    Err(Errno::Fault.into())
+                }
+            };
+        }
+        self.inner.fd_pwrite(mem, fd, iovs, offset).await
+    }
+
+    async fn fd_write(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        iovs: CiovecArray,
+    ) -> Result<Size, Error> {
+        if self.geds_descriptors.contains_key(&u32::from(fd)) {
+            let geds_file = self.geds_descriptors.get(&u32::from(fd)).unwrap();
+            let buf = first_non_empty_ciovec(mem, iovs)?;
+            let buf = mem.to_vec(buf)?;
+
+            return match geds_file.write(&buf, 0, buf.len()) {
+                Ok(()) => Ok(u32::try_from(buf.len())?),
+                Err(e) => {
+                    println!("Error fd_write: {}", e);
+                    Err(Errno::Fault.into())
+                }
+            };
+        }
+        self.inner.fd_write( mem, fd, iovs).await
+    }
+
+    async fn path_open(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        dirflags: Lookupflags,
+        path: GuestPtr<str>,
+        oflags: Oflags,
+        fs_rights_base: Rights,
+        fs_rights_inheriting: Rights,
+        fdflags: Fdflags,
+    ) -> Result<Fd, Error> {
+        let str_path = read_string(mem, path)?;
+        println!("Opening: {}", str_path);
+
+        if let Some(start) = str_path.find("geds://") {
+            let str_path = &str_path[start + 7..]; // Extrae lo que hay después de "geds://"
+            println!("Extracted path: {}", str_path);
+
+            let mut parts = str_path.splitn(2, '/'); // Divide solo en 2 partes (bucket y el resto)
+            let bucket = parts.next().unwrap_or_default();
+            let key = parts.next().unwrap_or_default();
+
+            println!("Bucket: {}", bucket);
+            println!("Key: {}", key);
+
+            let result;
+            if oflags.contains(Oflags::CREAT) {
+                result = self.geds.as_ref().unwrap().create(bucket, &key, true);
+            } else {
+                result = self.geds.as_ref().unwrap().open(bucket, &key);
+            }
+
+            return match result {
+                Ok(file) => {
+                    let fd = self
+                        .geds_descriptors
+                        .push(file)
+                        .unwrap();
+                    Ok(fd.into())
+                }
+                ,
+                Err(e) => {
+                    error!("Could not open GEDSFile: {}", e);
+                    Err(Errno::Noent.into())
+                }
+            };
+        }
+        self.inner.path_open(
+            mem,
+            fd,
+            dirflags,
+            path,
+            oflags,
+            fs_rights_base,
+            fs_rights_inheriting,
+            fdflags,
+        )
+            .await
+    }
+
+    async fn path_unlink_file(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        path: GuestPtr<str>,
+    ) -> Result<(), Error> {
+        let str_path = read_string(mem, path)?;
+        if str_path.contains("geds://") {
+            let path = str_path.replace("geds://", "");
+            let bucket = path.split("/").next().unwrap();
+            let key = path.split("/").skip(1).collect::<Vec<&str>>().join("/");
+            let result = self.geds.as_ref().unwrap().delete_object(bucket, &key);
+            return match result {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    error!("Could not delete GEDSFile: {}", e);
+                    Err(Errno::Noent.into())
+                }
+            };
+        }
+        self.inner.path_unlink_file( mem, fd, path).await
+    }
+}
+
+fn read_string<'a>(memory: &'a GuestMemory<'_>, ptr: GuestPtr<str>) -> Result<String, GuestError> {
+    Ok(memory.as_cow_str(ptr)?.into_owned())
+}
+
+fn first_non_empty_ciovec(
+    memory: &GuestMemory<'_>,
+    ciovs: CiovecArray,
+) -> Result<GuestPtr<[u8]>, GuestError> {
+    for iov in ciovs.iter() {
+        let iov = memory.read(iov?)?;
+        if iov.buf_len == 0 {
+            continue;
+        }
+        return Ok(iov.buf.as_array(iov.buf_len));
+    }
+    Ok(GuestPtr::new((0, 0)))
+}
+
+impl Deref for PeridotGEDSCtx {
+    type Target = PeridotContext;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}

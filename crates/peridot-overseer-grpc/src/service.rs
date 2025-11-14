@@ -11,19 +11,22 @@ pub mod overseer_proto {
 
 use overseer_proto::{
     overseer_server::{Overseer},
-    ModuleResponse, RegisterModuleRequest, RemoveModuleRequest, UpdateMaxBandwidthRequest,
-    UpdateMaxBandwidthResponse,
+    ModuleResponse, RegisterModuleRequest, RemoveModuleRequest, UpdateMetricsRequest, UpdateMetricsResponse
 };
 
 #[derive(Default)]
 pub struct OverseerService {
-    rates: Arc<Mutex<HashMap<u32, f64>>>,
-    demands: Arc<Mutex<HashMap<u32, f64>>>
+    received_metrics: Arc<Mutex<HashMap<String, Vec<f64>>>>,
+    _processed_metrics: Arc<Mutex<HashMap<String, f64>>>,
+
+    // IO-specific metrics
+    demands: Arc<Mutex<HashMap<String, f64>>>,
+    rates: Arc<Mutex<HashMap<String, f64>>>
 }
 
 impl OverseerService {
-    pub fn new(demands: Arc<Mutex<HashMap<u32, f64>>>, rates: Arc<Mutex<HashMap<u32, f64>>>) -> Self {
-        Self { demands, rates }
+    pub fn new(received_metrics: Arc<Mutex<HashMap<String, Vec<f64>>>>, _processed_metrics: Arc<Mutex<HashMap<String, f64>>>, demands: Arc<Mutex<HashMap<String, f64>>>, rates: Arc<Mutex<HashMap<String, f64>>>) -> Self {
+        Self { received_metrics, _processed_metrics, demands, rates}
     }
 }
 
@@ -34,10 +37,10 @@ impl Overseer for OverseerService {
         request: Request<RegisterModuleRequest>,
     ) -> Result<Response<ModuleResponse>, Status> {
         let inner = request.into_inner();
-        let pid = inner.pid;
+        let module_id = &inner.module_id;
         let demand = inner.demand;
-        self.demands.lock().await.insert(pid, demand);
-        info!("Registered module with PID: {} and demand: {}", pid, demand);
+        self.demands.lock().await.insert(module_id.clone(), demand);
+        info!("Registered module with PID: {} and demand: {}", module_id, demand);
         Ok(Response::new(ModuleResponse {}))
     }
 
@@ -45,27 +48,31 @@ impl Overseer for OverseerService {
         &self,
         request: Request<RemoveModuleRequest>,
     ) -> Result<Response<ModuleResponse>, Status> {
-        let pid = request.into_inner().pid;
-        self.demands.lock().await.remove(&pid);
-        info!("Removed module with PID: {}", pid);
+        let module_id = &request.into_inner().module_id;
+        self.demands.lock().await.remove(module_id);
+        info!("Removed module with PID: {}", module_id);
         Ok(Response::new(ModuleResponse {}))
     }
 
-    async fn update_max_bandwidth(
-        &self,
-        request: Request<UpdateMaxBandwidthRequest>,
-    ) -> Result<Response<UpdateMaxBandwidthResponse>, Status> {
-        let pids: Vec<u32> = request.into_inner().pids;
-        let mut stats: HashMap<u32, f64> = HashMap::new();
-
-        for pid in pids {
-            if let Some(rate) = self.rates.lock().await.get(&pid) {
-                stats.insert(pid, *rate);
-                info!("Updated bandwidth for PID: {} to {}", pid, rate);
+    async fn update_metrics(&self, request: Request<UpdateMetricsRequest>) -> Result<Response<UpdateMetricsResponse>, Status> {
+        let inner = request.into_inner();
+        let metrics = &inner.metrics;
+        for (key, value) in metrics {
+            match self.received_metrics.lock().await.get(key) {
+                Some(vec) => {
+                    let mut vec = vec.clone();
+                    vec.push(*value);
+                    self.received_metrics.lock().await.insert(key.clone(), vec);
+                }
+                None => {
+                    self.received_metrics.lock().await.insert(key.clone(), vec![*value]);
+                }
             }
         }
 
-        let response = UpdateMaxBandwidthResponse { stats };
-        Ok(Response::new(response))
+        // let metrics : HashMap<String, f64> = metrics.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let mut metrics = HashMap::new();
+        metrics.insert("token_rate".to_string(), *self.rates.lock().await.get(&inner.module_id).unwrap());
+        Ok(Response::new(UpdateMetricsResponse {metrics}))
     }
 }

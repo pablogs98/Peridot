@@ -1,8 +1,0 @@
-cmake_minimum_required(VERSION 3.29)
-project(wasm)
-set(CMAKE_CXX_STANDARD 26)
-set(CMAKE_C_STANDARD 23)
-add_subdirectory(helloworld)
-add_subdirectory(logsystem)
-add_subdirectory(read_write)
-add_subdirectory(sqlite)

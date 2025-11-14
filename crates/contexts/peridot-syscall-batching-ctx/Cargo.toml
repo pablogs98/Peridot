@@ -1,17 +1,16 @@
 [package]
-name = "peridot"
+name = "peridot-syscall-batching-ctx"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 
 [dependencies]
+peridot = { workspace = true }
 wiggle = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+wasmtime-wasi = {workspace = true}
 wasmtime = { workspace = true }
-wasmtime-wasi = { workspace = true }
 log = { workspace = true }
-serde = { version = "1.0.217", features = ["derive"] }
-uuid = { version = "1.18.1", features = ["v4"] }
-peridot-overseer-grpc = { workspace = true }
-serde_yaml = "0.9.34+deprecated"
+impl-tools = "0.10.3"
+wasmtime-wasi-io = "38.0.4"
