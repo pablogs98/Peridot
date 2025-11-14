@@ -19,8 +19,7 @@ use wasmtime::component::{self, Component, ResourceTable};
 use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::WasiCtxBuilder;
-use peridot::context;
-use peridot::context::{PeridotContext, WasiWrapper};
+use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher};
 use peridot_token_ctx::PeridotTokenCtx;
 
 pub struct PeridotShim;
@@ -29,7 +28,7 @@ pub struct PeridotCompiler(Engine);
 
 pub struct PeridotSandbox {
     engine: Engine,
-    metrics_publisher: Option<peridot::metrics::MetricsPublisher>,
+    metrics_publisher: Option<MetricsPublisher>,
     cancel: CancellationToken,
 }
 
@@ -43,7 +42,7 @@ impl Default for PeridotSandbox {
                 .context("Failed to create wasmtime engine")
                 .unwrap(),
             cancel: CancellationToken::new(),
-            metrics_publisher: Some(peridot::metrics::MetricsPublisher::new(vec![])),
+            metrics_publisher: Some(MetricsPublisher::new(vec![], vec![])),
         }
     }
 }
@@ -78,6 +77,9 @@ impl Sandbox for PeridotSandbox {
 
         let peridot_config =
             peridot::conf::PeridotConfig::new("/peridot_config.yaml").into_error_code();
+
+        // Subscribe metrics producers and start metrics update thread
+        self.metrics_publisher.unwrap().subscribe_producer(DiskIOMetricsProducer{});
 
         self.metrics_publisher
             .unwrap()
@@ -156,13 +158,13 @@ impl PeridotSandbox {
         )));
 
         #[cfg(feature = "token")]
-        let peridot_ctx = peridot_token_ctx::PeridotTokenCtx::new(PeridotContext::new(ctx_p1), Arc::clone(&token_bucket));
-        #[cfg(feature = "token")]
-        let wrapped_ctx = WasiWrapper::new(peridot_ctx);
-        #[cfg(feature = "token")]
-        context::add_to_linker_async(&mut module_linker, |wasi_ctx: &mut WasiWrapper<PeridotTokenCtx>| wasi_ctx )?;
+        let peridot_ctx = PeridotTokenCtx::new(ctx_p1, Arc::clone(&token_bucket));
 
-        let mut store = Store::new(&self.engine, wrapped_ctx);
+        peridot_token_ctx::add_to_linker_async(&mut module_linker, |wasi_ctx: &mut PeridotTokenCtx| {
+            wasi_ctx
+        })?;
+
+        let mut store = Store::new(&self.engine, peridot_ctx);
 
         self.metrics_publisher
             .unwrap()
