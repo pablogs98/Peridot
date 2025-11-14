@@ -6,12 +6,10 @@ use async_trait::async_trait;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::put_object::{PutObjectError, PutObjectOutput};
 use aws_sdk_s3::primitives::ByteStream;
-use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use wasmtime_wasi::p1::types::{Error, Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta, Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights, Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence};
-use wasmtime_wasi::p1::wasi_snapshot_preview1::WasiSnapshotPreview1;
-use wasmtime_wasi::p1::WasiP1Ctx;
+use wasmtime_wasi::p1::types::{Error, CiovecArray, Fd, Fdflags, Lookupflags, Oflags, Rights, Size};
+use wasmtime_wasi::p1::{WasiP1Ctx};
 use wiggle::{GuestError, GuestMemory, GuestPtr};
 use peridot::context::{DelegatingWasiCtx, PeridotContext};
 
@@ -86,29 +84,25 @@ pub struct PeridotS3Ctx {
     base: PeridotContext,
     s3: aws_sdk_s3::Client,
     s3_descriptors: S3Descriptors,
-    tokio_runtime: Runtime,
     futures: Vec<JoinHandle<(Result<PutObjectOutput, SdkError<PutObjectError>>, Duration, Instant)>>,
 }
 
 impl PeridotS3Ctx {
-    pub fn new(base: PeridotContext) -> Self {
+    pub async fn new(base: PeridotContext) -> Self {
         std::env::set_var("WASMTIME_LOG", "wasmtime_wasi=trace");
-        let config = Runtime::new()
-            .unwrap()
-            .block_on(aws_config::load_from_env());
+        let config = aws_config::load_from_env().await;
         let client = aws_sdk_s3::Client::new(&config);
         Self {
             base,
             s3: client,
             s3_descriptors: S3Descriptors::new(),
-            tokio_runtime: Runtime::new().unwrap(),
             futures: Vec::new(),
         }
     }
 
     fn spawn_s3_upload(&mut self, bucket: String, key: String, body: ByteStream) {
         let client = self.s3.clone();
-        let handle = self.tokio_runtime.spawn(async move {
+        let handle = tokio::spawn(async move {
             let start = Instant::now();
             let result = client.put_object()
                 .bucket(bucket)
@@ -143,6 +137,7 @@ impl DelegatingWasiCtx for PeridotS3Ctx {
         fd: Fd,
         iovs: CiovecArray,
     ) -> Result<Size, Error> {
+        println!("fd_write called");
         if self.s3_descriptors.contains_key(&u32::from(fd)) {
             let s3_file = self.s3_descriptors.get(&u32::from(fd)).unwrap();
             let buf = first_non_empty_ciovec(mem, iovs)?;
@@ -158,6 +153,7 @@ impl DelegatingWasiCtx for PeridotS3Ctx {
     }
 
     async fn path_open(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, dirflags: Lookupflags, path: GuestPtr<str>, oflags: Oflags, fs_rights_base: Rights, fs_rights_inheriting: Rights, fdflags: Fdflags) -> Result<Fd, Error> {
+        println!("path_open called");
         let str_path = read_string(mem, path)?;
         if let Some(start) = str_path.find("s3://") {
             let str_path = &str_path[start..];
@@ -187,16 +183,8 @@ fn first_non_empty_ciovec(
     Ok(GuestPtr::new((0, 0)))
 }
 
-impl Deref for PeridotS3Ctx {
-    type Target = PeridotContext;
-
-    fn deref(&self) -> &Self::Target {
-        &self.base
-    }
-}
-
-impl Drop for PeridotS3Ctx {
-    fn drop(&mut self) {
+impl PeridotS3Ctx {
+    pub async fn drain_uploads(&mut self) {
         if self.futures.is_empty() {
             return;
         }
@@ -205,34 +193,40 @@ impl Drop for PeridotS3Ctx {
 
         let mut total_elapsed = Duration::ZERO;
         let mut completed = 0;
-        let mut first_start = None;
-        let mut last_end = None;
+        let mut first_start: Option<Instant> = None;
+        let mut last_end: Option<Instant> = None;
 
         for handle in self.futures.drain(..) {
-            match self.tokio_runtime.block_on(handle) {
+            match handle.await {
                 Ok((Ok(_), elapsed, start)) => {
                     let end = start + elapsed;
                     info!("Upload completed in {:.2?}", elapsed);
 
-                    if first_start.is_none() || start < first_start.unwrap() {
+                    // track earliest start
+                    if first_start.map_or(true, |fst| start < fst) {
                         first_start = Some(start);
                     }
-                    if last_end.is_none() || end > last_end.unwrap() {
+
+                    // track latest end
+                    if last_end.map_or(true, |led| end > led) {
                         last_end = Some(end);
                     }
 
                     total_elapsed += elapsed;
                     completed += 1;
                 }
+
                 Ok((Err(e), _, _)) => {
                     error!("S3 upload failed: {:?}", e);
                 }
+
                 Err(join_err) => {
                     error!("Task join error: {:?}", join_err);
                 }
             }
         }
 
+        // Summary statistics
         if completed > 0 {
             let avg = total_elapsed / completed as u32;
             info!("Average S3 upload time: {:.2?}", avg);
@@ -248,3 +242,11 @@ impl Drop for PeridotS3Ctx {
     }
 }
 
+
+impl Deref for PeridotS3Ctx {
+    type Target = WasiP1Ctx;
+
+    fn deref(&self) -> &Self::Target {
+        &self.base.inner
+    }
+}

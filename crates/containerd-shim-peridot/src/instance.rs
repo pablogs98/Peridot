@@ -19,6 +19,9 @@ use wasmtime::component::{self, Component, ResourceTable};
 use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::WasiCtxBuilder;
+use peridot::context;
+use peridot::context::{PeridotContext, WasiWrapper};
+use peridot_token_ctx::PeridotTokenCtx;
 
 pub struct PeridotShim;
 
@@ -153,13 +156,13 @@ impl PeridotSandbox {
         )));
 
         #[cfg(feature = "token")]
-        let peridot_ctx = peridot_token_ctx::PeridotTokenCtx::new(ctx_p1, Arc::clone(&token_bucket));
+        let peridot_ctx = peridot_token_ctx::PeridotTokenCtx::new(PeridotContext::new(ctx_p1), Arc::clone(&token_bucket));
+        #[cfg(feature = "token")]
+        let wrapped_ctx = WasiWrapper::new(peridot_ctx);
+        #[cfg(feature = "token")]
+        context::add_to_linker_async(&mut module_linker, |wasi_ctx: &mut WasiWrapper<PeridotTokenCtx>| wasi_ctx )?;
 
-        peridot_token_ctx::add_to_linker_async(&mut module_linker, |wasi_ctx: &mut WasiP1Ctx| {
-            wasi_ctx
-        })?;
-
-        let mut store = Store::new(&self.engine, peridot_ctx);
+        let mut store = Store::new(&self.engine, wrapped_ctx);
 
         self.metrics_publisher
             .unwrap()
