@@ -1,4 +1,4 @@
-/home/lubrae/phd/wasm/Peridot/crates/imagenet-preprocessing/imagenet-preprocessing.wasm:
+/home/lubrae/phd/wasm/Peridot/crates/contexts/imagenet-preprocessing/imagenet-preprocessing.wasm:
     args: [true, 2]
     peridot_config:
         priority: 1

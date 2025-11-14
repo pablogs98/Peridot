@@ -63,6 +63,7 @@ clap = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 peridot = { workspace = true }
+tokio = "1.48.0"
 
 [features]
 token = ["dep:peridot-token-ctx"]

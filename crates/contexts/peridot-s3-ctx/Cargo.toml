@@ -6,9 +6,7 @@ edition.workspace = true
 
 [dependencies]
 wiggle = { workspace = true }
-anyhow = { workspace = true }
 async-trait = { workspace = true }
-wasmtime = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true }
 peridot = { workspace = true}

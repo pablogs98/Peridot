@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use wasmtime_wasi::p1::types::{Error, Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta, Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights, Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence};
+use std::ops::Deref;
+use wasmtime::Linker;
+use wasmtime_wasi::p1::types::{Advice, CiovecArray, Clockid, Dircookie, Error, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta, Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights, Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence};
 use wasmtime_wasi::p1::wasi_snapshot_preview1::WasiSnapshotPreview1;
 use wasmtime_wasi::p1::{wasi_snapshot_preview1, WasiP1Ctx};
-use wasmtime_wasi::WasiCtx;
 use wiggle::{anyhow, GuestMemory, GuestPtr};
-
 
 #[async_trait]
 pub trait DelegatingWasiCtx: Send {
@@ -387,7 +387,7 @@ pub trait DelegatingWasiCtx: Send {
 }
 
 pub struct PeridotContext {
-    inner: WasiP1Ctx,
+    pub inner: WasiP1Ctx,
 }
 
 impl PeridotContext {
@@ -410,6 +410,14 @@ pub struct WasiWrapper<T: DelegatingWasiCtx> {
 impl<T: DelegatingWasiCtx> WasiWrapper<T> {
     pub fn new(ctx: T) -> Self {
         Self { ctx }
+    }
+}
+
+impl <T: DelegatingWasiCtx> Deref for WasiWrapper<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.ctx
     }
 }
 
@@ -600,9 +608,9 @@ impl<T: DelegatingWasiCtx + Send> WasiSnapshotPreview1 for WasiWrapper<T> {
     }
 }
 
-pub fn add_to_linker<T: Send + 'static>(
-    linker: &mut wasmtime::Linker<T>,
-    f: impl Fn(&mut T) -> &mut WasiP1Ctx + Copy + Send + Sync + 'static,
+pub fn add_to_linker_async<T: Send + 'static + WasiSnapshotPreview1>(
+    linker: &mut Linker<T>,
+    f: impl Fn(&mut T) -> &mut T + Copy + Send + Sync + 'static,
 ) -> anyhow::Result<()> {
     wasi_snapshot_preview1::add_to_linker(linker, f)
 }

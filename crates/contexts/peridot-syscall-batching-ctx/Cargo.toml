@@ -13,3 +13,4 @@ wasmtime-wasi = {workspace = true}
 wasmtime = { workspace = true }
 log = { workspace = true }
 impl-tools = "0.10.3"
+wasmtime-wasi-io = "38.0.4"

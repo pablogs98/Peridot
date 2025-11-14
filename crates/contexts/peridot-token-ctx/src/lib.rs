@@ -151,18 +151,3 @@ impl DelegatingWasiCtx for PeridotTokenCtx {
         self.inner.fd_write(mem, fd, iovs).await
     }
 }
-
-impl Deref for PeridotTokenCtx {
-    type Target = PeridotContext;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-pub fn add_to_linker_async<T: Send + 'static>(
-    linker: &mut wasmtime::Linker<T>,
-    f: impl Fn(&mut T) -> &mut WasiP1Ctx + Copy + Send + Sync + 'static,
-) -> anyhow::Result<()> {
-    wasi_snapshot_preview1::add_to_linker(linker, f)
-}

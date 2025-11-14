@@ -5,6 +5,7 @@ use std::io::IoSlice;
 use std::ops::Deref;
 use wasmtime_wasi::p1::types::{CiovecArray, Error, Fd, Size};
 use wasmtime_wasi::p1::WasiP1Ctx;
+use wasmtime_wasi_io::IoView;
 use wiggle::{GuestError, GuestMemory, GuestPtr};
 
 pub struct PeridotSyscallBatchingCtx {
@@ -25,16 +26,20 @@ impl PeridotSyscallBatchingCtx {
     }
 
     async fn flush_buffer(&mut self, fd: Fd) -> Result<(), Error> {
-        if !self.io_slices_buffer.is_empty() {
-            let a = self.table().get_file(u32::from(fd));
-            let f = &a?.file;
+        if let Some((vecs, _)) = self.io_slices_buffer.remove(&fd) {
+            // concatenate all buffered writes for this fd
+            let data = vecs.concat();
 
-            let ioslices: Vec<IoSlice> = self.io_slices_buffer.iter()
-                .map(|v| IoSlice::new(&v.1 .0.concat()))
-                .collect();
-            
-            let _ = f.write_vectored(&ioslices).await?;
-            self.io_slices_buffer.clear();
+            // get the file handle temporarily
+            let file = {
+                let wasi_ctx = self.inner.inner();
+                let entry = wasi_ctx.table().get_file(fd)?;
+                entry.file.clone()  // clone or take ownership
+            };
+
+            // write outside the borrow of table()
+            let ioslices = [IoSlice::new(&data)];
+            file.write_vectored(&ioslices).await?;
         }
         Ok(())
     }
