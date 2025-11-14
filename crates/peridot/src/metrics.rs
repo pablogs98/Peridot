@@ -1,11 +1,11 @@
+use crate::conf::PeridotConfig;
 use peridot_overseer_grpc::client::OverseerGrpcClient;
 use std::collections::HashMap;
-use std::sync::mpsc::{Sender};
+use std::path::Path;
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{fs, thread, time};
-use std::path::Path;
 use uuid::Uuid;
-use crate::conf::PeridotConfig;
 
 ///
 /// [MetricsPublisher] is responsible for collecting metrics from and sending metrics to the Overseer,
@@ -13,19 +13,29 @@ use crate::conf::PeridotConfig;
 ///
 pub struct MetricsPublisher {
     subscribers: Arc<RwLock<Vec<Arc<Mutex<dyn MetricsSubscriber + Send + Sync>>>>>,
+    producers: Arc<RwLock<Vec<Box<dyn MetricsProducer + Send + Sync>>>>,
     tx: Option<Sender<()>>,
-    thread_handle: Option<thread::JoinHandle<()>>
+    thread_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl MetricsPublisher {
     /// Creates a new [MetricsPublisher] with the given subscribers. Subscribers are items that implement the [MetricsSubscriber] trait.
     /// [MetricsSubscriber]s must be thread-safe and sendable across threads, hence the use of [Arc] and [Mutex].
-    pub fn new(subscribers: Vec<Arc<Mutex<dyn MetricsSubscriber + Send + Sync>>>) -> Self {
+    pub fn new(
+        subscribers: Vec<Arc<Mutex<dyn MetricsSubscriber + Send + Sync>>>,
+        producers: Vec<Box<dyn MetricsProducer + Send + Sync>>,
+    ) -> Self {
         MetricsPublisher {
             subscribers: Arc::new(RwLock::new(subscribers)),
+            producers: Arc::new(RwLock::new(producers)),
             tx: None,
-            thread_handle: None
+            thread_handle: None,
         }
+    }
+
+    pub fn subscribe_producer(&mut self, producer: Box<dyn MetricsProducer + Send + Sync>) {
+        let mut prods = self.producers.write().unwrap();
+        prods.push(producer);
     }
 
     pub fn subscribe(&mut self, subscriber: Arc<Mutex<dyn MetricsSubscriber + Send + Sync>>) {
@@ -59,6 +69,7 @@ impl MetricsPublisher {
             Ok(()) => {
                 log::info!("Starting overseer thread. Wasm module ID: {}", &module_id);
                 let subscribers = Arc::clone(&self.subscribers);
+                let producers = Arc::clone(&self.producers);
 
                 let handle = thread::spawn(move || {
                     loop {
@@ -66,8 +77,14 @@ impl MetricsPublisher {
                             log::info!("Overseer thread received shutdown signal.");
                             break;
                         }
-
                         let mut gathered_metrics = HashMap::new();
+
+                        let prods = producers.read().unwrap();
+
+                        for producer in prods.iter() {
+                            producer.produce(&mut gathered_metrics);
+                        }
+
                         MetricsPublisher::update_disk_metrics(&mut gathered_metrics);
 
                         let received_metrics = client.update_metrics(&module_id, gathered_metrics);
@@ -124,7 +141,7 @@ impl MetricsPublisher {
         let path = format!("/proc/{}/io", pid);
         let mut values: HashMap<&str, u64> = HashMap::new();
         let input = fs::read_to_string(Path::new(&path)).unwrap();
-        
+
         for line in input.lines() {
             let parts: Vec<&str> = line.split(':').map(|s| s.trim()).collect();
             if parts.len() == 2 {
@@ -133,9 +150,15 @@ impl MetricsPublisher {
                 }
             }
         }
-        
-        metrics_map.insert("read_bytes".to_string(), *values.get("read_bytes").unwrap_or(&0) as f64);
-        metrics_map.insert("write_bytes".to_string(), *values.get("write_bytes").unwrap_or(&0) as f64);
+
+        metrics_map.insert(
+            "read_bytes".to_string(),
+            *values.get("read_bytes").unwrap_or(&0) as f64,
+        );
+        metrics_map.insert(
+            "write_bytes".to_string(),
+            *values.get("write_bytes").unwrap_or(&0) as f64,
+        );
     }
 }
 
@@ -144,4 +167,10 @@ impl MetricsPublisher {
 pub trait MetricsSubscriber {
     /// Updates the subscriber with the given metrics.
     fn update(&mut self, metrics: &HashMap<String, f64>);
+}
+
+/// [MetricsProducer] is a trait that defines the behavior of an object that can produce metrics.
+/// [MetricsProducer]s can be registered with a [MetricsPublisher] to provide additional metrics
+pub trait MetricsProducer {
+    fn produce(&self, metrics: &mut HashMap<String, f64>);
 }
