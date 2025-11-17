@@ -4,9 +4,15 @@ version.workspace = true
 authors.workspace = true
 edition.workspace = true
 
+[patch.crates-io]
+oci-spec = "0.8.3"
+
+
+[dependencies.containerd-shim-wasm]
+git = "https://github.com/miqalvarez/runwasi"
+
 [dependencies]
 tokio-util = "0.7.16"
-containerd-shim-wasm = "1.0.0"
 uuid = { version = "1.12.1", features = ["v4"] }
 
 wasmtime = { workspace = true }
