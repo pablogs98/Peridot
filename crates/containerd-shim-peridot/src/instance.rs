@@ -4,24 +4,23 @@ use containerd_shim_wasm::sandbox::context::{
 };
 use containerd_shim_wasm::sandbox::Sandbox;
 use containerd_shim_wasm::shim::{version, Compiler, Shim, Version};
-use peridot::token::TokenBucket;
-use peridot_overseer_grpc::client::OverseerGrpcClient;
-use std::collections::HashMap;
-use std::hash::Hash;
-use std::path::Path;
-use std::sync::mpsc::Receiver;
-use std::sync::{Arc, LazyLock, Mutex};
-use std::{fs, thread};
-use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
-use wasmtime::component::types::ComponentItem;
-use wasmtime::component::{self, Component, ResourceTable};
-use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
-use wasmtime_wasi::p1::WasiP1Ctx;
-use wasmtime_wasi::WasiCtxBuilder;
 use peridot::context;
 use peridot::context::WasiWrapper;
-use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher};
+use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher, MetricsSubscriber};
+#[cfg(feature = "token")]
+use peridot::token::TokenBucket;
+#[cfg(feature = "token")]
+use peridot_overseer_grpc::client::OverseerGrpcClient;
+use std::cell::RefCell;
+use std::hash::Hash;
+use std::sync::{Arc};
+use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
+use wasmtime::component::{self, Component, ResourceTable};
+use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
+use wasmtime_wasi::WasiCtxBuilder;
+
+#[cfg(feature = "token")]
 use peridot_token_ctx::PeridotTokenCtx;
 
 pub struct PeridotShim;
@@ -30,7 +29,7 @@ pub struct PeridotCompiler(Engine);
 
 pub struct PeridotSandbox {
     engine: Engine,
-    metrics_publisher: Option<MetricsPublisher>,
+    metrics_publisher: Option<Arc<Mutex<MetricsPublisher>>>,
     cancel: CancellationToken,
 }
 
@@ -44,7 +43,7 @@ impl Default for PeridotSandbox {
                 .context("Failed to create wasmtime engine")
                 .unwrap(),
             cancel: CancellationToken::new(),
-            metrics_publisher: Some(MetricsPublisher::new(vec![], vec![])),
+            metrics_publisher: Some(Arc::new(Mutex::new(MetricsPublisher::new(vec![], vec![])))),
         }
     }
 }
@@ -66,8 +65,7 @@ impl Shim for PeridotShim {
 
         config.async_support(true); // must be on
 
-        let engine = Engine::new(&config)
-            .expect("failed to create wasmtime precompilation engine");
+        let engine = Engine::new(&config).expect("failed to create wasmtime precompilation engine");
 
         Some(PeridotCompiler(engine))
     }
@@ -77,16 +75,20 @@ impl Sandbox for PeridotSandbox {
     async fn run_wasi(&self, ctx: &impl RuntimeContext) -> Result<i32> {
         log::info!("Setting up wasi");
 
-        let peridot_config =
-            peridot::conf::PeridotConfig::new("/peridot_config.yaml").into_error_code();
+        let peridot_config = peridot::conf::PeridotConfig::new("/peridot_config.yaml")
+            .expect("Failed to create peridot config");
 
         // Subscribe metrics producers and start metrics update thread
-        self.metrics_publisher.unwrap().subscribe_producer(DiskIOMetricsProducer{});
+        if let Some(mp) = self.metrics_publisher.as_ref() {
+            mp.lock()
+                .await
+                .subscribe_producer(Box::new(DiskIOMetricsProducer {}));
 
-        self.metrics_publisher
-            .unwrap()
-            .spawn_metrics_update_thread(peridot_config)
-            .await;
+            mp.lock()
+                .await
+                .spawn_metrics_update_thread(&peridot_config)
+                .await;
+        }
 
         let Entrypoint {
             source,
@@ -96,9 +98,15 @@ impl Sandbox for PeridotSandbox {
         } = ctx.entrypoint();
 
         let wasm_bytes = &source.as_bytes()?;
-        let result = self.execute(ctx, peridot_config, wasm_bytes, func).await.into_error_code();
+        let result = self
+            .execute(ctx, peridot_config, wasm_bytes, func)
+            .await
+            .into_error_code();
 
-        self.metrics_publisher.unwrap().stop_metrics_update_thread();
+        if let Some(mp) = self.metrics_publisher.as_ref() {
+            mp.lock().await.stop_metrics_update_thread();
+        }
+
         result
     }
 }
@@ -153,7 +161,7 @@ impl PeridotSandbox {
         #[cfg(feature = "token")]
         let max_bandwidth: u64 = config.io.max_bandwidth as u64;
         #[cfg(feature = "token")]
-        let token_bucket = Arc::new(Mutex::new(TokenBucket::new(
+        let token_bucket = Arc::new(std::sync::Mutex::new(TokenBucket::new(
             max_bandwidth,
             max_bandwidth,
             max_bandwidth,
@@ -164,15 +172,25 @@ impl PeridotSandbox {
             context::PeridotContext::new(ctx_p1),
             Arc::clone(&token_bucket),
         );
+        #[cfg(feature = "token")]
+        context::add_to_linker_async(
+            &mut module_linker,
+            |wasi_ctx: &mut WasiWrapper<PeridotTokenCtx>| wasi_ctx,
+        )?;
 
-        context::add_to_linker_async(&mut module_linker, |wasi_ctx: &mut WasiWrapper<PeridotTokenCtx>| wasi_ctx )?;
         let wrapped_ctx = WasiWrapper::new(peridot_ctx);
 
         let mut store = Store::new(&self.engine, wrapped_ctx);
 
-        self.metrics_publisher
-            .unwrap()
-            .subscribe(Arc::clone(&token_bucket));
+        let token_bucket = token_bucket as Arc<std::sync::Mutex<dyn MetricsSubscriber + Send + Sync>>;
+
+        #[cfg(feature = "token")]
+        if let Some(metrics_publisher) = &self.metrics_publisher {
+            metrics_publisher
+                .lock()
+                .await
+                .subscribe(Arc::clone(&token_bucket));
+        }
 
         log::info!("instantiating instance");
         let instance: wasmtime::Instance =

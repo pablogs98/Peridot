@@ -58,7 +58,7 @@ impl MetricsPublisher {
 
     /// Spawns a thread that periodically collects metrics and sends them to the overseer.
     /// Updates items that implement the [MetricsSubscriber] trait with the received metrics.
-    pub async fn spawn_metrics_update_thread(&mut self, conf: PeridotConfig) {
+    pub async fn spawn_metrics_update_thread(&mut self, conf: &PeridotConfig) {
         let client = OverseerGrpcClient::new("/run/peridot/overseer.sock").await;
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx = Some(tx);

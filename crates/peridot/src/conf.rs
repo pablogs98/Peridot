@@ -34,12 +34,10 @@ pub struct PeridotConfigInner {
     pub demand: f64,
 }
 
-type ConfigMap = HashMap<String, ModuleConfig>;
-
 impl PeridotConfig {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<ConfigMap, Box<dyn std::error::Error>> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<PeridotConfig, Box<dyn std::error::Error>> {
         let contents = fs::read_to_string(path)?;
-        let config: ConfigMap = serde_yaml::from_str(&contents)?;
+        let config: PeridotConfig = serde_yaml::from_str(&contents)?;
         Ok(config)
     }
 }

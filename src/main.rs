@@ -10,14 +10,16 @@ use std::time::{Duration, Instant};
 use std::{env, process, thread};
 use wasmtime::{Engine, Linker, Module, Store, Result, Config};
 
-use std::sync::{Arc, Mutex};
-use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder};
+use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 use peridot::conf::PeridotConfig;
 use peridot::context;
 use peridot::context::{PeridotContext, WasiWrapper};
+#[cfg(feature = "clock")]
 use peridot_clock_ctx::PeridotClockCtx;
 #[cfg(feature = "counter")]
 use peridot_counter_ctx::PeridotCounterCtx;
+
+#[cfg(feature = "s3")]
 use peridot_s3_ctx::PeridotS3Ctx;
 
 
@@ -99,7 +101,7 @@ async fn run_module(
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     if env::var_os("RUST_LOG").is_none() {
