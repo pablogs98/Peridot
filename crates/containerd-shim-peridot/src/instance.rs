@@ -9,14 +9,9 @@ use peridot::context::WasiWrapper;
 use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher, MetricsSubscriber};
 #[cfg(feature = "token")]
 use peridot::token::TokenBucket;
-#[cfg(feature = "token")]
-use peridot_overseer_grpc::client::OverseerGrpcClient;
-use std::cell::RefCell;
 use std::hash::Hash;
 use std::sync::{Arc};
 use tokio::sync::Mutex;
-use tokio_util::sync::CancellationToken;
-use wasmtime::component::{self, Component, ResourceTable};
 use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
 use wasmtime_wasi::WasiCtxBuilder;
 
@@ -30,7 +25,6 @@ pub struct PeridotCompiler(Engine);
 pub struct PeridotSandbox {
     engine: Engine,
     metrics_publisher: Option<Arc<Mutex<MetricsPublisher>>>,
-    cancel: CancellationToken,
 }
 
 impl Default for PeridotSandbox {
@@ -42,7 +36,6 @@ impl Default for PeridotSandbox {
             engine: Engine::new(&config)
                 .context("Failed to create wasmtime engine")
                 .unwrap(),
-            cancel: CancellationToken::new(),
             metrics_publisher: Some(Arc::new(Mutex::new(MetricsPublisher::new(vec![], vec![])))),
         }
     }

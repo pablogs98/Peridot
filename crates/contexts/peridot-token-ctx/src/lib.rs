@@ -1,12 +1,10 @@
-use std::ops::Deref;
 use log::{debug};
 use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use peridot::token::TokenBucket;
 use wasmtime_wasi::p1::types::{CiovecArray, Error, Fd, Filesize, IovecArray, Size};
-use wasmtime_wasi::p1::wasi_snapshot_preview1::WasiSnapshotPreview1;
-use wasmtime_wasi::p1::{wasi_snapshot_preview1, WasiP1Ctx};
-use wiggle::{GuestMemory, GuestPtr};
+use wasmtime_wasi::p1::{WasiP1Ctx};
+use wiggle::{GuestMemory};
 use peridot::context::{DelegatingWasiCtx, PeridotContext};
 
 pub struct PeridotTokenCtx {
