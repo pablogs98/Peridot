@@ -68,6 +68,13 @@ impl Sandbox for PeridotSandbox {
     async fn run_wasi(&self, ctx: &impl RuntimeContext) -> Result<i32> {
         log::info!("Setting up wasi");
 
+        // List all files in root directory
+        let paths = std::fs::read_dir("./").unwrap();
+
+        for path in paths {
+            println!("Name: {}", path.unwrap().path().display())
+        }
+
         let peridot_config = peridot::conf::PeridotConfig::new("/peridot_config.yaml")
             .expect("Failed to create peridot config");
 
