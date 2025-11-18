@@ -14,6 +14,22 @@ use std::sync::{Arc};
 use tokio::sync::Mutex;
 use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
 use wasmtime_wasi::WasiCtxBuilder;
+use std::fs;
+use std::path::Path;
+
+fn print_dirs(path: &Path) {
+    if path.is_dir() {
+        println!("{}", path.display());
+
+        for entry in fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                print_dirs(&path);
+            }
+        }
+    }
+}
 
 #[cfg(feature = "token")]
 use peridot_token_ctx::PeridotTokenCtx;
@@ -69,11 +85,7 @@ impl Sandbox for PeridotSandbox {
         log::info!("Setting up wasi");
 
         // List all files in root directory
-        let paths = std::fs::read_dir("./").unwrap();
-
-        for path in paths {
-            println!("Name: {}", path.unwrap().path().display())
-        }
+        print_dirs(Path::new("/"));
 
         let peridot_config = peridot::conf::PeridotConfig::new("/peridot_config.yaml")
             .expect("Failed to create peridot config");
