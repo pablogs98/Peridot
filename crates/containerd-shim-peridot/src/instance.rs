@@ -14,19 +14,13 @@ use std::sync::{Arc};
 use tokio::sync::Mutex;
 use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
 use wasmtime_wasi::WasiCtxBuilder;
-use std::fs;
-use std::path::Path;
+use walkdir::WalkDir;
 
-fn print_dirs(path: &Path) {
-    if path.is_dir() {
-        println!("{}", path.display());
-
-        for entry in fs::read_dir(path).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path.is_dir() {
-                print_dirs(&path);
-            }
+fn print_dirs() {
+    for entry in WalkDir::new("/") {
+        let entry = entry.unwrap();
+        if entry.file_type().is_dir() {
+            println!("{}", entry.path().display());
         }
     }
 }
@@ -85,7 +79,7 @@ impl Sandbox for PeridotSandbox {
         log::info!("Setting up wasi");
 
         // List all files in root directory
-        print_dirs(Path::new("/"));
+        print_dirs();
 
         let peridot_config = peridot::conf::PeridotConfig::new("/peridot_config.yaml")
             .expect("Failed to create peridot config");

@@ -12,20 +12,14 @@ oci-spec = "0.8.3"
 git = "https://github.com/miqalvarez/runwasi"
 
 [dependencies]
-tokio-util = "0.7.16"
-uuid = { version = "1.12.1", features = ["v4"] }
-
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
-env_logger = { workspace = true }
 log = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
-peridot-overseer-grpc = { workspace = true }
-libc = "0.2.177"
 peridot = { workspace = true }
 peridot-token-ctx = {path = "../contexts/peridot-token-ctx", optional = true}
-peridot-s3-ctx = {path = "../contexts/peridot-s3-ctx"}
+walkdir = "2.5.0"
 
 [features]
 token = ["dep:peridot-token-ctx"]
