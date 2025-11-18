@@ -22,12 +22,6 @@ pub struct CpuConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ModuleConfig {
-    pub args: Vec<String>,
-    pub peridot_config: PeridotConfigInner,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct PeridotConfigInner {
     pub priority: u32,
     pub demand: f64,
