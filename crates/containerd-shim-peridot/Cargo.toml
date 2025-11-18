@@ -20,6 +20,7 @@ tokio = { workspace = true }
 peridot = { workspace = true }
 peridot-token-ctx = {path = "../contexts/peridot-token-ctx", optional = true}
 walkdir = "2.5.0"
+oci-spec = "0.8.3"
 
 [features]
 token = ["dep:peridot-token-ctx"]
@@ -27,3 +28,4 @@ token = ["dep:peridot-token-ctx"]
 [[bin]]
 name = "containerd-shim-peridot-v1"
 path = "src/main.rs"
+

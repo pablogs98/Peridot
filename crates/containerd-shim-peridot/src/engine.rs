@@ -4,27 +4,24 @@ use containerd_shim_wasm::sandbox::context::{
 };
 use containerd_shim_wasm::sandbox::Sandbox;
 use containerd_shim_wasm::shim::{version, Compiler, Shim, Version};
+use log::{debug, info};
+use oci_spec::image::MediaType;
+use peridot::conf::{CpuConfig, IoConfig, PeridotConfig};
 use peridot::context;
 use peridot::context::WasiWrapper;
 use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher, MetricsSubscriber};
 #[cfg(feature = "token")]
 use peridot::token::TokenBucket;
+use std::fs::File;
 use std::hash::Hash;
-use std::sync::{Arc};
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::Mutex;
+use walkdir::WalkDir;
 use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
 use wasmtime_wasi::WasiCtxBuilder;
-use walkdir::WalkDir;
 
-fn print_dirs() {
-    for entry in WalkDir::new("/") {
-        let entry = entry.unwrap();
-        if entry.file_type().is_dir() {
-            println!("{}", entry.path().display());
-        }
-    }
-}
-
+use crate::source::Source;
 #[cfg(feature = "token")]
 use peridot_token_ctx::PeridotTokenCtx;
 
@@ -76,12 +73,9 @@ impl Shim for PeridotShim {
 
 impl Sandbox for PeridotSandbox {
     async fn run_wasi(&self, ctx: &impl RuntimeContext) -> Result<i32> {
-        log::info!("Setting up wasi");
+        info!("Setting up wasi");
 
-        // List all files in root directory
-        print_dirs();
-
-        let peridot_config = peridot::conf::PeridotConfig::new("/peridot_config.yaml")
+        let peridot_config = load_peridot_config(ctx).await
             .expect("Failed to create peridot config");
 
         // Subscribe metrics producers and start metrics update thread
@@ -154,7 +148,7 @@ impl PeridotSandbox {
     async fn execute_module(
         &self,
         ctx: &impl RuntimeContext,
-        config: peridot::conf::PeridotConfig,
+        config: PeridotConfig,
         module: Module,
         func: &String,
     ) -> Result<i32> {
@@ -188,7 +182,8 @@ impl PeridotSandbox {
 
         let mut store = Store::new(&self.engine, wrapped_ctx);
 
-        let token_bucket = token_bucket as Arc<std::sync::Mutex<dyn MetricsSubscriber + Send + Sync>>;
+        let token_bucket =
+            token_bucket as Arc<std::sync::Mutex<dyn MetricsSubscriber + Send + Sync>>;
 
         #[cfg(feature = "token")]
         if let Some(metrics_publisher) = &self.metrics_publisher {
@@ -218,7 +213,7 @@ impl PeridotSandbox {
     async fn execute(
         &self,
         ctx: &impl RuntimeContext,
-        config: peridot::conf::PeridotConfig,
+        config: PeridotConfig,
         wasm_binary: &[u8],
         func: String,
     ) -> Result<i32> {
@@ -292,5 +287,58 @@ impl IntoErrorCode for Result<i32> {
 impl IntoErrorCode for Result<()> {
     fn into_error_code(self) -> Result<i32> {
         self.map(|_| 0).into_error_code()
+    }
+}
+
+pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotConfig> {
+    match ctx.entrypoint().source {
+        containerd_shim_wasm::sandbox::context::Source::File(_) => Ok(PeridotConfig {
+            args: vec![],
+            io: IoConfig {
+                demand: -1f64,
+                max_bandwidth: -1f64,
+            },
+            cpu: CpuConfig {
+                demand: -1f64,
+                utilization: -1f64,
+            },
+        }),
+
+        containerd_shim_wasm::sandbox::context::Source::Oci(layers) => {
+            info!(" >>> configuring spin oci application {}", layers.len());
+
+            for layer in layers {
+                debug!("<<< layer config: {:?}", layer.config);
+            }
+
+            for artifact in layers {
+                match artifact.config.media_type() {
+                    MediaType::Other(name)
+                        if name == "peridot-config.yaml" =>
+                    {
+                        let path = PathBuf::from("/peridot_conf.yaml");
+                        info!("Writing Peridot OCI config to {path:?}");
+                        File::create(&path)
+                            .context("failed to create peridot config files").unwrap()
+                            .write_all(&artifact.layer)
+                            .context("failed to write peridot config file").unwrap();
+                        return Ok(PeridotConfig::new("/peridot_conf.yaml").unwrap());
+                    }
+                    MediaType::Other(name)
+                        if name == "application/vnd.wasm.content.layer.v1+wasm" =>
+                    {
+                        info!(
+                            "This is the WASM layer! Size = {:?}",
+                            artifact.layer.len(),
+                        );
+                    }
+                    _ => {
+                        debug!("<<< unknown media type {:?}", artifact.config.media_type());
+                    }
+                }
+            }
+
+            Err(anyhow::anyhow!("Peridot OCI config layer not found."))
+        }
     }
 }
