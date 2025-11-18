@@ -1,6 +1,9 @@
-/home/lubrae/phd/wasm/Peridot/crates/contexts/imagenet-preprocessing/imagenet-preprocessing.wasm:
-    args: [true, 2]
-    peridot_config:
-        priority: 1
-        demand: 1024    # B/s
+args: ["--enable-logs",  "--verbose"]
 
+io:
+    demand: 0.75
+    max_bandwidth: 150.0
+
+cpu:
+    demand: 0.60
+    utilization: 0.85
