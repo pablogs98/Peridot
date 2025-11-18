@@ -17,11 +17,10 @@ use std::hash::Hash;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use walkdir::WalkDir;
 use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
 use wasmtime_wasi::WasiCtxBuilder;
+use std::io::Write;
 
-use crate::source::Source;
 #[cfg(feature = "token")]
 use peridot_token_ctx::PeridotTokenCtx;
 
@@ -121,7 +120,7 @@ impl Compiler for PeridotCompiler {
 
         for layer in layers {
             if Engine::detect_precompiled(&layer.layer).is_some() {
-                log::info!("Already precompiled");
+                info!("Already precompiled");
                 compiled_layers.push(None);
                 continue;
             }
@@ -152,11 +151,11 @@ impl PeridotSandbox {
         module: Module,
         func: &String,
     ) -> Result<i32> {
-        log::debug!("execute module");
+        debug!("execute module");
 
         let ctx_p1 = wasi_builder(ctx)?.build_p1();
         let mut module_linker = Linker::new(&self.engine);
-        log::debug!("init linker");
+        debug!("init linker");
 
         #[cfg(feature = "token")]
         let max_bandwidth: u64 = config.io.max_bandwidth as u64;
@@ -193,16 +192,16 @@ impl PeridotSandbox {
                 .subscribe(Arc::clone(&token_bucket));
         }
 
-        log::info!("instantiating instance");
+        info!("instantiating instance");
         let instance: wasmtime::Instance =
             module_linker.instantiate_async(&mut store, &module).await?;
 
-        log::debug!("getting start function");
+        debug!("getting start function");
         let start_func = instance
             .get_func(&mut store, func)
             .context("module does not have a WASI start function")?;
 
-        log::info!("running start function {func:?}");
+        info!("running start function {func:?}");
 
         start_func
             .call_async(&mut store, &[], &mut [])
@@ -219,7 +218,7 @@ impl PeridotSandbox {
     ) -> Result<i32> {
         match WasmBinaryType::from_bytes(wasm_binary) {
             Some(WasmBinaryType::Module) => {
-                log::debug!("loading wasm module");
+                debug!("loading wasm module");
                 let module = Module::from_binary(&self.engine, wasm_binary)?;
                 self.execute_module(ctx, config, module, &func).await
             }
@@ -228,7 +227,7 @@ impl PeridotSandbox {
             }
             None => match Engine::detect_precompiled(wasm_binary) {
                 Some(Precompiled::Module) => {
-                    log::info!("using precompiled module");
+                    info!("using precompiled module");
                     let module = unsafe { Module::deserialize(&self.engine, wasm_binary) }?;
                     self.execute_module(ctx, config, module, &func).await
                 }
@@ -254,7 +253,7 @@ pub(crate) fn envs_from_ctx(ctx: &impl RuntimeContext) -> Vec<(String, String)> 
 }
 
 fn wasi_builder(ctx: &impl RuntimeContext) -> Result<WasiCtxBuilder, anyhow::Error> {
-    log::debug!("building WASI context");
+    debug!("building WASI context");
 
     let file_perms = wasmtime_wasi::FilePerms::all();
     let dir_perms = wasmtime_wasi::DirPerms::all();
@@ -267,7 +266,7 @@ fn wasi_builder(ctx: &impl RuntimeContext) -> Result<WasiCtxBuilder, anyhow::Err
         .inherit_stdio()
         .preopened_dir("/", "/", dir_perms, file_perms)?;
 
-    log::debug!("WASI context built successfully");
+    debug!("WASI context built successfully");
     Ok(builder)
 }
 
@@ -321,7 +320,7 @@ pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotCon
                         File::create(&path)
                             .context("failed to create peridot config files").unwrap()
                             .write_all(&artifact.layer)
-                            .context("failed to write peridot config file").unwrap();
+                            .context("failed to write peridot config file")?;
                         return Ok(PeridotConfig::new("/peridot_conf.yaml").unwrap());
                     }
                     MediaType::Other(name)
