@@ -6,7 +6,7 @@ use containerd_shim_wasm::sandbox::Sandbox;
 use containerd_shim_wasm::shim::{version, Compiler, Shim, Version};
 use log::{debug, info};
 use oci_spec::image::MediaType;
-use peridot::conf::{PeridotConfig};
+use peridot::conf::PeridotConfig;
 use peridot::context;
 use peridot::context::WasiWrapper;
 use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher, MetricsSubscriber};
@@ -14,13 +14,14 @@ use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher, MetricsSubscribe
 use peridot::token::TokenBucket;
 use std::fs::File;
 use std::hash::Hash;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
 use wasmtime_wasi::WasiCtxBuilder;
-use std::io::Write;
 
+use crate::constants;
 #[cfg(feature = "token")]
 use peridot_token_ctx::PeridotTokenCtx;
 
@@ -68,13 +69,21 @@ impl Shim for PeridotShim {
 
         Some(PeridotCompiler(engine))
     }
+
+    fn supported_layers_types() -> &'static [&'static str] {
+        &[
+            oci_wasm::WASM_LAYER_MEDIA_TYPE,
+            constants::OCI_LAYER_MEDIA_TYPE_PERIDOT_CONFIG,
+        ]
+    }
 }
 
 impl Sandbox for PeridotSandbox {
     async fn run_wasi(&self, ctx: &impl RuntimeContext) -> Result<i32> {
         info!("Setting up wasi");
 
-        let peridot_config = load_peridot_config(ctx).await
+        let peridot_config = load_peridot_config(ctx)
+            .await
             .expect("Failed to create peridot config");
 
         // Subscribe metrics producers and start metrics update thread
@@ -87,7 +96,6 @@ impl Sandbox for PeridotSandbox {
                 .await
                 .spawn_metrics_update_thread(&peridot_config)
                 .await?;
-
         }
 
         let Entrypoint {
@@ -304,24 +312,23 @@ pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotCon
             for artifact in layers {
                 match artifact.config.media_type() {
                     MediaType::Other(name)
-                    if name == "application/vnd.wasm.content.layer.v1+wasm" =>
-                        {
-                            let path = PathBuf::from("/peridot_conf.yaml");
-                            println!("Writing Peridot OCI config to {path:?}");
-                            File::create(&path)
-                                .context("failed to create peridot config files").unwrap()
-                                .write_all(&artifact.layer)
-                                .context("failed to write peridot config file")?;
-                            return Ok(PeridotConfig::new("/peridot_conf.yaml").unwrap());
-                        }
+                        if name == "application/vnd.wasm.content.layer.v1+wasm" =>
+                    {
+                        let path = PathBuf::from("/peridot_conf.yaml");
+                        println!("Writing Peridot OCI config to {path:?}");
+                        File::create(&path)
+                            .context("failed to create peridot config files")
+                            .unwrap()
+                            .write_all(&artifact.layer)
+                            .context("failed to write peridot config file")?;
+                        return Ok(PeridotConfig::new("/peridot_conf.yaml").unwrap());
+                    }
                     MediaType::Other(name)
-                    if name == "application/vnd.bytecodealliance.wasm.component.layer.v0+wasm" =>
-                        {
-                            println!(
-                            "This is the WASM layer! Size = {:?}",
-                            artifact.layer.len(),
-                        );
-                        }
+                        if name
+                            == "application/vnd.bytecodealliance.wasm.component.layer.v0+wasm" =>
+                    {
+                        println!("This is the WASM layer! Size = {:?}", artifact.layer.len(),);
+                    }
                     _ => {
                         println!("<<< unknown media type {:?}", artifact.config.media_type());
                         debug!("<<< unknown media type {:?}", artifact.config.media_type());

@@ -1,0 +1,1 @@
+pub(crate) const OCI_LAYER_MEDIA_TYPE_PERIDOT_CONFIG: &str = "application/vnd.peridot.config.layer.v0+yaml";

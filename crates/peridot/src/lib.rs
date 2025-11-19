@@ -12,3 +12,4 @@ pub mod context;
 
 /// Metrics module for Peridot. Handles collection and reporting of system and application metrics.
 pub mod metrics;
+
