@@ -1,6 +1,8 @@
+overseer_address: "http://127.0.0.1:50051"
+
 args:
     - false
-    - 3
+    - 5000
 
 io:
     demand: 1000
