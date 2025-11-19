@@ -103,13 +103,11 @@ async fn run_module(
     let mut store = Store::new(&engine, wrapped_ctx);
     linker.allow_shadowing(true);
 
-    #[cfg(feature = "token")]
-    // Option<Arc<Mutex<MetricsPublisher>>>
     let metrics_publisher = Some(Arc::new(Mutex::new(MetricsPublisher::new(vec![], vec![]))));
 
-    #[cfg(feature = "token")]
     // Subscribe metrics producers and start metrics update thread
     if let Some(mp) = &metrics_publisher {
+        #[cfg(feature = "token")]
         mp.lock()
             .await
             .subscribe(Arc::clone(&(token_bucket as Arc<std::sync::Mutex<dyn MetricsSubscriber + Send + Sync>>)));
@@ -121,7 +119,7 @@ async fn run_module(
         mp.lock()
             .await
             .spawn_metrics_update_thread(&config)
-            .await;
+            .await?;
     }
 
     // Load and run the WebAssembly module

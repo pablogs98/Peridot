@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::{fs, time};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
+use anyhow::{anyhow, Result};
 
 /// [MetricsSubscriber] is a trait that defines the behavior of an object that can receive metric updates.
 /// [MetricsSubscriber]s subscribe to a [MetricsPublisher] to receive updates.
@@ -59,19 +60,17 @@ impl MetricsPublisher {
 
     /// Spawns a thread that periodically collects metrics and sends them to the overseer.
     /// Updates items that implement the [MetricsSubscriber] trait with the received metrics.
-    pub async fn spawn_metrics_update_thread(&mut self, conf: &PeridotConfig) {
-        let client = OverseerGrpcClient::new(conf.overseer_address.as_str()).await;
+    pub async fn spawn_metrics_update_thread(&mut self, conf: &PeridotConfig) -> Result<()> {
+        let client =
+            OverseerGrpcClient::new(conf.overseer_address.as_ref().expect("overseer_address must be set").as_str()).await;
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx = Some(tx);
 
         let mut client = match client {
             Ok(client) => client,
             Err(e) => {
-                log::error!(
-                    "Failed to create grpc client, overseer will be unavailable. Error: {}",
-                    e.to_string()
-                );
-                return;
+                let error = format!("Failed to create grpc client: {}", e.to_string());
+                Err(anyhow!(error))?
             }
         };
 
@@ -104,17 +103,24 @@ impl MetricsPublisher {
                             metrics
                         }; // <-- lock released here
 
-                        let received_metrics = client.update_metrics(&module_id, gathered_metrics).await;
+                        let received_metrics =
+                            client.update_metrics(&module_id, gathered_metrics).await;
 
                         if !received_metrics.is_empty() {
                             let subs = subscribers.read().unwrap();
                             for subscriber in subs.iter() {
                                 let mut s = subscriber.lock().unwrap();
-                                println!("Overseer updating subscriber with metrics: {:?}", &received_metrics);
+                                println!(
+                                    "Overseer updating subscriber with metrics: {:?}",
+                                    &received_metrics
+                                );
                                 s.update(&received_metrics);
                             }
                         } else {
-                            log::warn!("No metrics received from overseer for module ID: {}", &module_id);
+                            log::warn!(
+                                "No metrics received from overseer for module ID: {}",
+                                &module_id
+                            );
                         }
 
                         tokio::time::sleep(time::Duration::from_secs(1)).await;
@@ -124,12 +130,13 @@ impl MetricsPublisher {
                 });
 
                 self.thread_handle = Some(handle);
+                Ok(())
             }
             Err(status) => {
-                log::error!(
+                Err(anyhow!(
                     "Failed to register module, overseer will be unavailable. Status: {}",
                     status
-                );
+                ))
             }
         }
     }
@@ -151,7 +158,6 @@ impl MetricsPublisher {
                     Err(e) => log::error!("Failed to join overseer task: {:?}", e),
                 }
             }
-
         } else {
             log::warn!("Overseer thread handle not found, cannot shut down thread.");
             return;

@@ -4,7 +4,7 @@ use std::path::Path;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct PeridotConfig {
-    pub overseer_address: String,
+    pub overseer_address: Option<String>,
     pub args: Vec<String>,
     pub io: IoConfig,
     pub cpu: CpuConfig,

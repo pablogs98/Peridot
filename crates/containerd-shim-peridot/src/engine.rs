@@ -6,7 +6,7 @@ use containerd_shim_wasm::sandbox::Sandbox;
 use containerd_shim_wasm::shim::{version, Compiler, Shim, Version};
 use log::{debug, info};
 use oci_spec::image::MediaType;
-use peridot::conf::{CpuConfig, IoConfig, PeridotConfig};
+use peridot::conf::{PeridotConfig};
 use peridot::context;
 use peridot::context::WasiWrapper;
 use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher, MetricsSubscriber};
@@ -86,7 +86,8 @@ impl Sandbox for PeridotSandbox {
             mp.lock()
                 .await
                 .spawn_metrics_update_thread(&peridot_config)
-                .await;
+                .await?;
+
         }
 
         let Entrypoint {
@@ -103,7 +104,7 @@ impl Sandbox for PeridotSandbox {
             .into_error_code();
 
         if let Some(mp) = self.metrics_publisher.as_ref() {
-            mp.lock().await.stop_metrics_update_thread();
+            mp.lock().await.stop_metrics_update_thread().await;
         }
 
         result
