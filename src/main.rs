@@ -1,4 +1,4 @@
-use peridot::metrics::DiskIOMetricsProducer;
+use peridot::metrics::{DiskIOMetricsProducer, MetricsSubscriber};
 use clap::Parser;
 
 use std::path::Path;
@@ -15,6 +15,7 @@ use peridot::metrics::MetricsPublisher;
 use peridot::token::TokenBucket;
 use tokio::sync::Mutex;
 
+#[cfg(feature = "counter")]
 use peridot::counter::PeridotCounter;
 #[cfg(feature = "clock")]
 use peridot_clock_ctx::PeridotClockCtx;
