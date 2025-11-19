@@ -298,11 +298,10 @@ pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotCon
             info!(" >>> configuring spin oci application {}", layers.len());
 
             for layer in layers {
-                debug!("<<< layer config: {:?}", layer.config);
+                println!("<<< layer config: {:?}", layer.config);
             }
 
             for artifact in layers {
-                println!("<<< artifact media type: {:?}", artifact.config.media_type());
                 match artifact.config.media_type() {
                     MediaType::Other(name)
                     if name == "peridot-config.yaml" =>
