@@ -1,19 +1,20 @@
 use clap::Parser;
 
 use std::path::Path;
-use std::sync::{Arc};
+use std::sync::Arc;
 use std::{env, process};
 use wasmtime::{Config, Engine, Linker, Module, Result, Store};
 
 use peridot::conf::PeridotConfig;
 use peridot::context;
 use peridot::context::{PeridotContext, WasiWrapper};
-use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher, MetricsSubscriber};
+use peridot::metrics::MetricsPublisher;
 
 #[cfg(feature = "token")]
 use peridot::token::TokenBucket;
 use tokio::sync::Mutex;
 
+use peridot::counter::PeridotCounter;
 #[cfg(feature = "clock")]
 use peridot_clock_ctx::PeridotClockCtx;
 #[cfg(feature = "counter")]
@@ -85,12 +86,15 @@ async fn run_module(
         Arc::clone(&token_bucket),
     );
 
+    #[cfg(feature = "counter")]
+    let counter = Arc::new(std::sync::Mutex::new(PeridotCounter::new()));
+
     #[cfg(feature = "geds")]
     let peridot_ctx = PeridotGEDSCtx::new(PeridotContext::new(wasi));
     #[cfg(feature = "clock")]
     let peridot_ctx = PeridotClockCtx::new(PeridotContext::new(wasi));
     #[cfg(feature = "counter")]
-    let peridot_ctx = PeridotCounterCtx::new(PeridotContext::new(wasi));
+    let peridot_ctx = PeridotCounterCtx::new(PeridotContext::new(wasi), counter.clone());
     #[cfg(feature = "s3")]
     let peridot_ctx = PeridotS3Ctx::new(PeridotContext::new(wasi)).await;
     #[cfg(feature = "token")]
@@ -108,20 +112,20 @@ async fn run_module(
     let mut store = Store::new(&engine, wrapped_ctx);
     linker.allow_shadowing(true);
 
-    #[cfg(feature = "token")]
+    #[cfg(feature = "counter")]
     // Option<Arc<Mutex<MetricsPublisher>>>
     let metrics_publisher = Some(Arc::new(Mutex::new(MetricsPublisher::new(vec![], vec![]))));
 
-    #[cfg(feature = "token")]
+    #[cfg(feature = "counter")]
     // Subscribe metrics producers and start metrics update thread
     if let Some(mp) = &metrics_publisher {
-        mp.lock()
-            .await
-            .subscribe(Arc::clone(&(token_bucket as Arc<std::sync::Mutex<dyn MetricsSubscriber + Send + Sync>>)));
+        // mp.lock()
+        //     .await
+        //     .subscribe(Arc::clone(&(token_bucket as Arc<std::sync::Mutex<dyn MetricsSubscriber + Send + Sync>>)));
 
         mp.lock()
             .await
-            .subscribe_producer(Box::new(DiskIOMetricsProducer {}));
+            .subscribe_producer(Box::new(counter));
 
         mp.lock()
             .await
@@ -140,7 +144,7 @@ async fn run_module(
     #[cfg(feature="s3")]
     store.data_mut().ctx.drain_uploads().await;
 
-    #[cfg(feature = "token")]
+    #[cfg(feature = "counter")]
     if let Some(mp) = metrics_publisher {
         mp.lock().await.stop_metrics_update_thread().await;
     }

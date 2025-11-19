@@ -71,5 +71,3 @@ s3 = ["dep:peridot-s3-ctx"]
 geds = ["dep:peridot-geds-ctx"]
 clock = ["dep:peridot-clock-ctx"]
 counter = ["dep:peridot-counter-ctx"]
-
-default = ["s3"]
