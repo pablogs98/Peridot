@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, RwLock};
-use std::{fs, thread, time};
+use std::{fs, time};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 /// [MetricsSubscriber] is a trait that defines the behavior of an object that can receive metric updates.
@@ -28,7 +29,7 @@ pub struct MetricsPublisher {
     subscribers: Arc<RwLock<Vec<Arc<Mutex<dyn MetricsSubscriber + Send + Sync>>>>>,
     producers: Arc<RwLock<Vec<Box<dyn MetricsProducer + Send + Sync>>>>,
     tx: Option<Sender<()>>,
-    thread_handle: Option<thread::JoinHandle<()>>,
+    thread_handle: Option<JoinHandle<()>>,
 }
 
 impl MetricsPublisher {
@@ -58,8 +59,8 @@ impl MetricsPublisher {
 
     /// Spawns a thread that periodically collects metrics and sends them to the overseer.
     /// Updates items that implement the [MetricsSubscriber] trait with the received metrics.
-    pub async fn spawn_metrics_update_thread(&mut self, conf: &PeridotConfig) {
-        let client = OverseerGrpcClient::new("/run/peridot/overseer.sock").await;
+    pub async fn spawn_metrics_update_thread(&mut self, conf: &PeridotConfig, overseer_address: &str) {
+        let client = OverseerGrpcClient::new(overseer_address).await;
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx = Some(tx);
 
@@ -78,39 +79,48 @@ impl MetricsPublisher {
 
         let demand = conf.io.demand;
 
-        match client.register_module(&module_id, demand) {
+        match client.register_module(&module_id, demand).await {
             Ok(()) => {
                 log::info!("Starting overseer thread. Wasm module ID: {}", &module_id);
                 let subscribers = Arc::clone(&self.subscribers);
                 let producers = Arc::clone(&self.producers);
 
-                let handle = thread::spawn(move || {
+                let handle = tokio::spawn(async move {
                     loop {
                         if let Ok(()) = rx.try_recv() {
                             log::info!("Overseer thread received shutdown signal.");
                             break;
                         }
-                        let mut gathered_metrics = HashMap::new();
 
-                        let prods = producers.read().unwrap();
+                        // gather metrics without holding the lock across .await
+                        println!("Overseer gathering metrics from producers.");
+                        let gathered_metrics = {
+                            let prods = producers.read().unwrap();
+                            let mut metrics = HashMap::new();
+                            for producer in prods.iter() {
+                                producer.produce(&mut metrics);
+                                println!("Overseer gathered metrics: {:?}", &metrics);
+                            }
+                            metrics
+                        }; // <-- lock released here
 
-                        for producer in prods.iter() {
-                            producer.produce(&mut gathered_metrics);
-                        }
+                        let received_metrics = client.update_metrics(&module_id, gathered_metrics).await;
 
-                        let received_metrics = client.update_metrics(&module_id, gathered_metrics);
                         if !received_metrics.is_empty() {
                             let subs = subscribers.read().unwrap();
                             for subscriber in subs.iter() {
                                 let mut s = subscriber.lock().unwrap();
+                                println!("Overseer updating subscriber with metrics: {:?}", &received_metrics);
                                 s.update(&received_metrics);
                             }
+                        } else {
+                            log::warn!("No metrics received from overseer for module ID: {}", &module_id);
                         }
 
-                        // more update calls can be added here
-                        thread::sleep(time::Duration::from_secs(1));
+                        tokio::time::sleep(time::Duration::from_secs(1)).await;
                     }
-                    client.remove_module(&module_id).unwrap();
+
+                    client.remove_module(&module_id).await.unwrap();
                 });
 
                 self.thread_handle = Some(handle);
@@ -125,7 +135,7 @@ impl MetricsPublisher {
     }
 
     /// Stops the overseer thread by sending a shutdown signal and joining the thread.
-    pub fn stop_metrics_update_thread(&mut self) {
+    pub async fn stop_metrics_update_thread(&mut self) {
         if let Some(tx) = self.tx.take() {
             match tx.send(()) {
                 Ok(()) => log::info!("Sent shutdown signal to overseer thread."),
@@ -136,11 +146,12 @@ impl MetricsPublisher {
             }
 
             if let Some(handle) = self.thread_handle.take() {
-                match handle.join() {
-                    Ok(()) => log::info!("Overseer thread has been shut down."),
-                    Err(e) => log::error!("Failed to join overseer thread: {:?}", e),
+                match handle.await {
+                    Ok(_) => log::info!("Overseer thread has been shut down."),
+                    Err(e) => log::error!("Failed to join overseer task: {:?}", e),
                 }
             }
+
         } else {
             log::warn!("Overseer thread handle not found, cannot shut down thread.");
             return;

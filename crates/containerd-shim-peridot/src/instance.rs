@@ -79,7 +79,7 @@ impl Sandbox for PeridotSandbox {
 
             mp.lock()
                 .await
-                .spawn_metrics_update_thread(&peridot_config)
+                .spawn_metrics_update_thread(&peridot_config,"http://localhost:5501")
                 .await;
         }
 
@@ -97,7 +97,7 @@ impl Sandbox for PeridotSandbox {
             .into_error_code();
 
         if let Some(mp) = self.metrics_publisher.as_ref() {
-            mp.lock().await.stop_metrics_update_thread();
+            mp.lock().await.stop_metrics_update_thread().await;
         }
 
         result

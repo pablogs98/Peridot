@@ -15,3 +15,4 @@ serde = { version = "1.0.217", features = ["derive"] }
 uuid = { version = "1.18.1", features = ["v4"] }
 peridot-overseer-grpc = { workspace = true }
 serde_yaml = "0.9.34+deprecated"
+tokio = "1.48.0"

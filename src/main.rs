@@ -1,27 +1,28 @@
 use clap::Parser;
-use log::{debug, error};
-
-use nix::sys::wait::waitpid;
-use nix::sys::wait::{WaitPidFlag, WaitStatus};
-use nix::unistd::{fork, ForkResult};
 
 use std::path::Path;
-use std::time::{Duration, Instant};
-use std::{env, process, thread};
-use wasmtime::{Engine, Linker, Module, Store, Result, Config};
+use std::sync::{Arc};
+use std::{env, process};
+use wasmtime::{Config, Engine, Linker, Module, Result, Store};
 
-use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 use peridot::conf::PeridotConfig;
 use peridot::context;
 use peridot::context::{PeridotContext, WasiWrapper};
+use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher, MetricsSubscriber};
+
+#[cfg(feature = "token")]
+use peridot::token::TokenBucket;
+use tokio::sync::Mutex;
+
 #[cfg(feature = "clock")]
 use peridot_clock_ctx::PeridotClockCtx;
 #[cfg(feature = "counter")]
 use peridot_counter_ctx::PeridotCounterCtx;
-
 #[cfg(feature = "s3")]
 use peridot_s3_ctx::PeridotS3Ctx;
-
+#[cfg(feature = "token")]
+use peridot_token_ctx::PeridotTokenCtx;
+use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 
 /// Peridot - Transparent Integration of new logic in legacy Wasm modules
 #[derive(Parser, Debug)]
@@ -39,22 +40,25 @@ struct Args {
     /// Overridden by RUST_LOG env var if set.
     #[arg(short, long, default_value = "info")]
     log_level: String,
+
+    /// Path to the WebAssembly module to run
+    #[arg(short='m', long, required = false)]
+    module_path: Option<String>,
 }
 
 async fn run_module(
-    module_path: &str,
-    args: &Vec<String>,
-    _i: usize,
-    _overseer_address: &Option<String>,
-    _demand: f64,
+    module_path: String,
+    config: PeridotConfig,
+    overseer_address: &Option<String>,
 ) -> Result<()> {
     // Configure engine and linker
     let engine = Engine::new(Config::new().async_support(true))?;
     let mut linker = Linker::new(&engine);
 
     // Set up WASI
+    let args: Vec<String> = config.args.clone();
     println!("Module path: {}", module_path);
-    let module_dir = Path::new(module_path).parent().unwrap();
+    let module_dir = Path::new(&module_path).parent().unwrap();
     println!("Module dir: {}",module_dir.display());
 
     let wasi = WasiCtxBuilder::new()
@@ -64,8 +68,22 @@ async fn run_module(
         ".",
         DirPerms::all(),
         FilePerms::all(),
-    )?.args(args).build_p1();
+    )?.args(&*args).build_p1();
 
+    #[cfg(feature = "token")]
+    let max_bandwidth: u64 = config.io.max_bandwidth as u64;
+    #[cfg(feature = "token")]
+    let token_bucket = Arc::new(std::sync::Mutex::new(TokenBucket::new(
+        max_bandwidth,
+        max_bandwidth,
+        max_bandwidth,
+    )));
+
+    #[cfg(feature = "token")]
+    let peridot_ctx = PeridotTokenCtx::new(
+        PeridotContext::new(wasi),
+        Arc::clone(&token_bucket),
+    );
 
     #[cfg(feature = "geds")]
     let peridot_ctx = PeridotGEDSCtx::new(PeridotContext::new(wasi));
@@ -75,6 +93,8 @@ async fn run_module(
     let peridot_ctx = PeridotCounterCtx::new(PeridotContext::new(wasi));
     #[cfg(feature = "s3")]
     let peridot_ctx = PeridotS3Ctx::new(PeridotContext::new(wasi)).await;
+    #[cfg(feature = "token")]
+    context::add_to_linker_async(&mut linker, |wasi_ctx: &mut WasiWrapper<PeridotTokenCtx>| wasi_ctx )?;
     #[cfg(feature = "geds")]
     context::add_to_linker_async(&mut linker, |wasi_ctx: &mut WasiWrapper<PeridotGEDSCtx>| wasi_ctx )?;
     #[cfg(feature = "clock")]
@@ -87,7 +107,28 @@ async fn run_module(
     let wrapped_ctx = WasiWrapper::new(peridot_ctx);
     let mut store = Store::new(&engine, wrapped_ctx);
     linker.allow_shadowing(true);
-    
+
+    #[cfg(feature = "token")]
+    // Option<Arc<Mutex<MetricsPublisher>>>
+    let metrics_publisher = Some(Arc::new(Mutex::new(MetricsPublisher::new(vec![], vec![]))));
+
+    #[cfg(feature = "token")]
+    // Subscribe metrics producers and start metrics update thread
+    if let Some(mp) = &metrics_publisher {
+        mp.lock()
+            .await
+            .subscribe(Arc::clone(&(token_bucket as Arc<std::sync::Mutex<dyn MetricsSubscriber + Send + Sync>>)));
+
+        mp.lock()
+            .await
+            .subscribe_producer(Box::new(DiskIOMetricsProducer {}));
+
+        mp.lock()
+            .await
+            .spawn_metrics_update_thread(&config, &*overseer_address.clone().unwrap())
+            .await;
+    }
+
     // Load and run the WebAssembly module
     let module = Module::from_file(&engine, module_path)?;
     linker.module(&mut store, "", &module)?;
@@ -98,10 +139,16 @@ async fn run_module(
 
     #[cfg(feature="s3")]
     store.data_mut().ctx.drain_uploads().await;
+
+    #[cfg(feature = "token")]
+    if let Some(mp) = metrics_publisher {
+        mp.lock().await.stop_metrics_update_thread().await;
+    }
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     if env::var_os("RUST_LOG").is_none() {
@@ -110,6 +157,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     let overseer_address = &args.overseer_address;
+    let module_path = match &args.module_path {
+        Some(path) => path.clone(),
+        None => {
+            eprintln!("Error: Module path is required.");
+            process::exit(1);
+        }
+    };
 
     let config = match PeridotConfig::new(&args.config_path) {
         Ok(config) => config,
@@ -119,6 +173,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    run_module(module_path, config, overseer_address).await?;
 
     Ok(())
 }

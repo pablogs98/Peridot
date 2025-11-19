@@ -54,25 +54,35 @@ impl Overseer for OverseerService {
         Ok(Response::new(ModuleResponse {}))
     }
 
-    async fn update_metrics(&self, request: Request<UpdateMetricsRequest>) -> Result<Response<UpdateMetricsResponse>, Status> {
+    async fn update_metrics(
+        &self,
+        request: Request<UpdateMetricsRequest>,
+    ) -> Result<Response<UpdateMetricsResponse>, Status> {
         let inner = request.into_inner();
-        let metrics = &inner.metrics;
-        for (key, value) in metrics {
-            match self.received_metrics.lock().await.get(key) {
-                Some(vec) => {
-                    let mut vec = vec.clone();
-                    vec.push(*value);
-                    self.received_metrics.lock().await.insert(key.clone(), vec);
-                }
-                None => {
-                    self.received_metrics.lock().await.insert(key.clone(), vec![*value]);
-                }
+
+        // 1) Actualizar received_metrics con UN solo lock
+        {
+            let mut map = self.received_metrics.lock().await;
+            for (key, value) in &inner.metrics {
+                map.entry(key.clone()).or_default().push(*value);
             }
         }
 
-        // let metrics : HashMap<String, f64> = metrics.iter().map(|(k, v)| (k.clone(), *v)).collect();
-        let mut metrics = HashMap::new();
-        metrics.insert("token_rate".to_string(), *self.rates.lock().await.get(&inner.module_id).unwrap());
-        Ok(Response::new(UpdateMetricsResponse {metrics}))
+        // 2) Leer rates con UN solo lock
+        let rate = {
+            let rates = self.rates.lock().await;
+            match rates.get(&inner.module_id) {
+                Some(v) => *v,
+                None => {
+                    // evita unwrap
+                    return Err(Status::not_found("Module ID not found in rates"));
+                }
+            }
+        };
+
+        // 3) Construir respuesta
+        Ok(Response::new(UpdateMetricsResponse {
+            metrics: HashMap::from([("token_rate".into(), rate)]),
+        }))
     }
 }

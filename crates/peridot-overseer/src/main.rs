@@ -2,29 +2,27 @@ mod policy;
 
 use crate::policy::MinMaxFairShare;
 use clap::Parser;
-use log::{info};
+use log::info;
 use peridot_overseer_grpc::service::overseer_proto::overseer_server::OverseerServer;
 use peridot_overseer_grpc::service::OverseerService;
 use std::collections::HashMap;
 use std::error;
-use std::fs::remove_file;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::UnixListener;
+use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Mutex;
 use tokio::{time};
-use tonic::codegen::tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::Server;
 
 /// Peridot Overseer
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// IP address
+    /// TCP port to listen on localhost
     #[arg(required = true)]
-    address: String,
+    port: u16,
 
     /// Max I/O bandwidth (B/s)
     #[arg(required = true)]
@@ -35,7 +33,6 @@ struct Args {
     update_interval: u64,
 
     /// Log level (e.g. debug, info, warn, error). Defaults to "info".
-    /// Overridden by RUST_LOG env var if set.
     #[arg(short, long, default_value = "info")]
     log_level: String,
 }
@@ -49,14 +46,13 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
     }
     env_logger::init();
 
-    let addr = &args.address;
+    let addr = format!("127.0.0.1:{}", args.port).parse()?;
     let max_bandwidth = args.max_bandwidth;
     let update_interval = args.update_interval;
 
     let rates: Arc<Mutex<HashMap<String, f64>>> = Arc::new(Mutex::new(HashMap::new()));
     let demands: Arc<Mutex<HashMap<String, f64>>> = Arc::new(Mutex::new(HashMap::new()));
-    let received_metrics: Arc<Mutex<HashMap<String, Vec<f64>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let received_metrics: Arc<Mutex<HashMap<String, Vec<f64>>>> = Arc::new(Mutex::new(HashMap::new()));
     let processed_metrics: Arc<Mutex<HashMap<String, f64>>> = Arc::new(Mutex::new(HashMap::new()));
     let end_thread = Arc::new(AtomicBool::new(false));
 
@@ -76,24 +72,23 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         Arc::clone(&demands),
         Arc::clone(&rates),
     );
-    let uds = UnixListener::bind(addr)?;
-    let uds_stream = UnixListenerStream::new(uds);
 
     info!("Overseer running on {}", addr);
 
     Server::builder()
         .add_service(OverseerServer::new(service))
-        .serve_with_incoming_shutdown(uds_stream, grpc_sigint(end_thread.clone()))
+        .serve_with_shutdown(addr, grpc_sigint(end_thread.clone()))
         .await?;
 
     end_thread.store(true, Ordering::Relaxed);
     update_io_stats_future
         .await?
         .expect("Error joining I/O stats update task");
-    remove_file(addr)?;
+
     Ok(())
 }
 
+/// Handle SIGINT for graceful shutdown
 async fn grpc_sigint(end_threads: Arc<AtomicBool>) {
     let _ = signal(SignalKind::interrupt())
         .expect("Failed to create a new SIGINT signal handler for gRPC")
@@ -117,10 +112,6 @@ async fn update_io_stats(
     let policy = MinMaxFairShare::new(max_bandwidth, Arc::clone(&demands), Arc::clone(&rates));
 
     received_metrics.lock().await.clear();
-
-    // let mut file = File::create("/tmp/io_stats.txt").await?;
-    // file.write("timestamp_ms,pid,read_bytes,write_bytes\n".as_bytes())
-    //     .await?;
 
     while !end_thread.load(Ordering::Relaxed) {
         interval.tick().await;

@@ -2,20 +2,20 @@ use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct PeridotConfig {
     pub args: Vec<String>,
     pub io: IoConfig,
     pub cpu: CpuConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct IoConfig {
     pub demand: f64,
     pub max_bandwidth: f64, // optional
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct CpuConfig {
     pub demand: f64,
     pub utilization: f64,

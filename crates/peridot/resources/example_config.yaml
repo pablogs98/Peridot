@@ -1,8 +1,10 @@
-args: ["--enable-logs",  "--verbose"]
+args:
+    - false
+    - 3
 
 io:
-    demand: 0.75
-    max_bandwidth: 150.0
+    demand: 1000
+    max_bandwidth: 1000
 
 cpu:
     demand: 0.60
