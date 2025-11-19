@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use containerd_shim_wasm::sandbox::context::{
     Entrypoint, RuntimeContext, WasmBinaryType, WasmLayer,
 };
@@ -6,7 +6,7 @@ use containerd_shim_wasm::sandbox::Sandbox;
 use containerd_shim_wasm::shim::{version, Compiler, Shim, Version};
 use log::{debug, info};
 use oci_spec::image::MediaType;
-use peridot::conf::{CpuConfig, IoConfig, PeridotConfig};
+use peridot::conf::{PeridotConfig};
 use peridot::context;
 use peridot::context::WasiWrapper;
 use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher, MetricsSubscriber};
@@ -85,8 +85,9 @@ impl Sandbox for PeridotSandbox {
 
             mp.lock()
                 .await
-                .spawn_metrics_update_thread(&peridot_config,"http://localhost:5501")
-                .await;
+                .spawn_metrics_update_thread(&peridot_config)
+                .await?;
+
         }
 
         let Entrypoint {
@@ -103,7 +104,7 @@ impl Sandbox for PeridotSandbox {
             .into_error_code();
 
         if let Some(mp) = self.metrics_publisher.as_ref() {
-            mp.lock().await.stop_metrics_update_thread();
+            mp.lock().await.stop_metrics_update_thread().await;
         }
 
         result
@@ -291,17 +292,7 @@ impl IntoErrorCode for Result<()> {
 
 pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotConfig> {
     match ctx.entrypoint().source {
-        containerd_shim_wasm::sandbox::context::Source::File(_) => Ok(PeridotConfig {
-            args: vec![],
-            io: IoConfig {
-                demand: -1f64,
-                max_bandwidth: -1f64,
-            },
-            cpu: CpuConfig {
-                demand: -1f64,
-                utilization: -1f64,
-            },
-        }),
+        containerd_shim_wasm::sandbox::context::Source::File(_) => Err(anyhow!("Not implemented")),
 
         containerd_shim_wasm::sandbox::context::Source::Oci(layers) => {
             info!(" >>> configuring spin oci application {}", layers.len());

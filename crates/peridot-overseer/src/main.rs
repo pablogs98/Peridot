@@ -10,7 +10,6 @@ use std::error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Mutex;
 use tokio::{time};

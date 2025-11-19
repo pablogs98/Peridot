@@ -29,28 +29,23 @@ use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Path to the WebAssembly module to run
+    #[arg(required = true)]
+    module_path: Option<String>,
+
     /// Path to the YAML configuration file (e.g. config.yaml)
     #[arg(required = true)]
     config_path: String,
-
-    /// Overseer Unix Domain Socket address (e.g. /tmp/peridot.sock)
-    #[arg(short = 'o', long, required = false)]
-    overseer_address: Option<String>,
 
     /// Log level (e.g. debug, info, warn, error). Defaults to "info".
     /// Overridden by RUST_LOG env var if set.
     #[arg(short, long, default_value = "info")]
     log_level: String,
-
-    /// Path to the WebAssembly module to run
-    #[arg(short='m', long, required = false)]
-    module_path: Option<String>,
 }
 
 async fn run_module(
     module_path: String,
     config: PeridotConfig,
-    overseer_address: &Option<String>,
 ) -> Result<()> {
     // Configure engine and linker
     let engine = Engine::new(Config::new().async_support(true))?;
@@ -112,25 +107,28 @@ async fn run_module(
     let mut store = Store::new(&engine, wrapped_ctx);
     linker.allow_shadowing(true);
 
-    #[cfg(feature = "counter")]
-    // Option<Arc<Mutex<MetricsPublisher>>>
     let metrics_publisher = Some(Arc::new(Mutex::new(MetricsPublisher::new(vec![], vec![]))));
 
-    #[cfg(feature = "counter")]
     // Subscribe metrics producers and start metrics update thread
     if let Some(mp) = &metrics_publisher {
-        // mp.lock()
-        //     .await
-        //     .subscribe(Arc::clone(&(token_bucket as Arc<std::sync::Mutex<dyn MetricsSubscriber + Send + Sync>>)));
+        #[cfg(feature = "token")]
+        mp.lock()
+            .await
+            .subscribe(Arc::clone(&(token_bucket as Arc<std::sync::Mutex<dyn MetricsSubscriber + Send + Sync>>)));
 
+        #[cfg(feature = "counter")]
         mp.lock()
             .await
             .subscribe_producer(Box::new(counter));
 
         mp.lock()
             .await
-            .spawn_metrics_update_thread(&config, &*overseer_address.clone().unwrap())
-            .await;
+            .subscribe_producer(Box::new(DiskIOMetricsProducer {}));
+
+        mp.lock()
+            .await
+            .spawn_metrics_update_thread(&config)
+            .await?;
     }
 
     // Load and run the WebAssembly module
@@ -160,7 +158,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     env_logger::init();
 
-    let overseer_address = &args.overseer_address;
     let module_path = match &args.module_path {
         Some(path) => path.clone(),
         None => {
@@ -177,7 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    run_module(module_path, config, overseer_address).await?;
+    run_module(module_path, config).await?;
 
     Ok(())
 }

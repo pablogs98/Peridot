@@ -1,7 +1,6 @@
 use crate::client::overseer::{RemoveModuleRequest, UpdateMetricsRequest};
 use overseer::{overseer_client::OverseerClient, RegisterModuleRequest};
 use std::collections::HashMap;
-use std::error::Error;
 
 pub mod overseer {
     tonic::include_proto!("overseer");
@@ -11,7 +10,7 @@ pub struct OverseerGrpcClient {
 }
 
 impl OverseerGrpcClient {
-    pub async fn new(address: &str) -> Result<OverseerGrpcClient, Box<dyn Error>> {
+    pub async fn new(address: &str) -> Result<OverseerGrpcClient, tonic::transport::Error> {
         let address_owned = address.to_owned();
 
         println!("Connecting to Overseer at address: {}", address_owned);
