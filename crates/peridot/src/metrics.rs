@@ -28,7 +28,7 @@ pub trait MetricsProducer {
 ///
 pub struct MetricsPublisher {
     subscribers: Arc<RwLock<Vec<Arc<Mutex<dyn MetricsSubscriber + Send + Sync>>>>>,
-    producers: Arc<RwLock<Vec<Box<dyn MetricsProducer + Send + Sync>>>>,
+    producers: Arc<RwLock<Vec<Arc<dyn MetricsProducer + Send + Sync>>>>,
     tx: Option<Sender<()>>,
     thread_handle: Option<JoinHandle<()>>,
 }
@@ -38,7 +38,7 @@ impl MetricsPublisher {
     /// [MetricsSubscriber]s must be thread-safe and sendable across threads, hence the use of [Arc] and [Mutex].
     pub fn new(
         subscribers: Vec<Arc<Mutex<dyn MetricsSubscriber + Send + Sync>>>,
-        producers: Vec<Box<dyn MetricsProducer + Send + Sync>>,
+        producers: Vec<Arc<dyn MetricsProducer + Send + Sync>>,
     ) -> Self {
         MetricsPublisher {
             subscribers: Arc::new(RwLock::new(subscribers)),
@@ -48,7 +48,7 @@ impl MetricsPublisher {
         }
     }
 
-    pub fn subscribe_producer(&mut self, producer: Box<dyn MetricsProducer + Send + Sync>) {
+    pub fn subscribe_producer(&mut self, producer: Arc<dyn MetricsProducer + Send + Sync>) {
         let mut prods = self.producers.write().unwrap();
         prods.push(producer);
     }

@@ -1,4 +1,4 @@
-use peridot::metrics::DiskIOMetricsProducer;
+use peridot::metrics::{DiskIOMetricsProducer, MetricsProducer};
 use clap::Parser;
 
 use std::path::Path;
@@ -14,8 +14,6 @@ use peridot::metrics::MetricsPublisher;
 #[cfg(feature = "token")]
 use peridot::token::TokenBucket;
 use tokio::sync::Mutex;
-
-use peridot::counter::PeridotCounter;
 #[cfg(feature = "clock")]
 use peridot_clock_ctx::PeridotClockCtx;
 #[cfg(feature = "counter")]
@@ -25,6 +23,7 @@ use peridot_s3_ctx::PeridotS3Ctx;
 #[cfg(feature = "token")]
 use peridot_token_ctx::PeridotTokenCtx;
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
+use peridot_counter_ctx::PeridotCounter;
 
 /// Peridot - Transparent Integration of new logic in legacy Wasm modules
 #[derive(Parser, Debug)]
@@ -83,7 +82,7 @@ async fn run_module(
     );
 
     #[cfg(feature = "counter")]
-    let counter = Arc::new(std::sync::Mutex::new(PeridotCounter::new()));
+    let counter = Arc::new(PeridotCounter::new());
 
     #[cfg(feature = "geds")]
     let peridot_ctx = PeridotGEDSCtx::new(PeridotContext::new(wasi));
@@ -120,11 +119,11 @@ async fn run_module(
         #[cfg(feature = "counter")]
         mp.lock()
             .await
-            .subscribe_producer(Box::new(counter));
+            .subscribe_producer(Arc::clone(&(counter as Arc<dyn MetricsProducer + Send + Sync>)));
 
         mp.lock()
             .await
-            .subscribe_producer(Box::new(DiskIOMetricsProducer {}));
+            .subscribe_producer(Arc::new(DiskIOMetricsProducer {}));
 
         mp.lock()
             .await
