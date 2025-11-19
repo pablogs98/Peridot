@@ -1,4 +1,5 @@
-use peridot::metrics::{DiskIOMetricsProducer, MetricsProducer};
+use peridot::metrics::{DiskIOMetricsProducer, MetricsSubscriber};
+use peridot::metrics::{MetricsProducer};
 use clap::Parser;
 
 use std::path::Path;
@@ -18,12 +19,13 @@ use tokio::sync::Mutex;
 use peridot_clock_ctx::PeridotClockCtx;
 #[cfg(feature = "counter")]
 use peridot_counter_ctx::PeridotCounterCtx;
+#[cfg(feature = "counter")]
+use peridot_counter_ctx::PeridotCounter;
 #[cfg(feature = "s3")]
 use peridot_s3_ctx::PeridotS3Ctx;
 #[cfg(feature = "token")]
 use peridot_token_ctx::PeridotTokenCtx;
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
-use peridot_counter_ctx::PeridotCounter;
 
 /// Peridot - Transparent Integration of new logic in legacy Wasm modules
 #[derive(Parser, Debug)]

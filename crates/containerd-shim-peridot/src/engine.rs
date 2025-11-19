@@ -302,6 +302,7 @@ pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotCon
             }
 
             for artifact in layers {
+                println!("<<< artifact media type: {:?}", artifact.config.media_type());
                 match artifact.config.media_type() {
                     MediaType::Other(name)
                     if name == "peridot-config.yaml" =>
