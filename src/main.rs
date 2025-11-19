@@ -1,3 +1,4 @@
+use peridot::metrics::DiskIOMetricsProducer;
 use clap::Parser;
 
 use std::path::Path;
