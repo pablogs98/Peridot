@@ -295,7 +295,7 @@ pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotCon
         containerd_shim_wasm::sandbox::context::Source::File(_) => Err(anyhow!("Not implemented")),
 
         containerd_shim_wasm::sandbox::context::Source::Oci(layers) => {
-            info!(" >>> configuring spin oci application {}", layers.len());
+            println!(" >>> configuring oci application {}", layers.len());
 
             for layer in layers {
                 println!("<<< layer config: {:?}", layer.config);
