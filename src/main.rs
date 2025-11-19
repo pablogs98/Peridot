@@ -1,5 +1,4 @@
-use peridot::metrics::{DiskIOMetricsProducer, MetricsSubscriber};
-use peridot::metrics::{MetricsProducer};
+use peridot::metrics::{DiskIOMetricsProducer, MetricsSubscriber, MetricsProducer};
 use clap::Parser;
 
 use std::path::Path;

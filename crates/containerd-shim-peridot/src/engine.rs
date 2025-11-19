@@ -81,7 +81,7 @@ impl Sandbox for PeridotSandbox {
         if let Some(mp) = self.metrics_publisher.as_ref() {
             mp.lock()
                 .await
-                .subscribe_producer(Box::new(DiskIOMetricsProducer {}));
+                .subscribe_producer(Arc::new(DiskIOMetricsProducer {}));
 
             mp.lock()
                 .await
