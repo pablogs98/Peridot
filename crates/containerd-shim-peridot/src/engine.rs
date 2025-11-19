@@ -103,7 +103,7 @@ impl Sandbox for PeridotSandbox {
             .into_error_code();
 
         if let Some(mp) = self.metrics_publisher.as_ref() {
-            mp.lock().await.stop_metrics_update_thread().await;
+            mp.lock().await.stop_metrics_update_thread();
         }
 
         result
@@ -303,24 +303,24 @@ pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotCon
             for artifact in layers {
                 match artifact.config.media_type() {
                     MediaType::Other(name)
-                        if name == "peridot-config.yaml" =>
-                    {
-                        let path = PathBuf::from("/peridot_conf.yaml");
-                        info!("Writing Peridot OCI config to {path:?}");
-                        File::create(&path)
-                            .context("failed to create peridot config files").unwrap()
-                            .write_all(&artifact.layer)
-                            .context("failed to write peridot config file")?;
-                        return Ok(PeridotConfig::new("/peridot_conf.yaml").unwrap());
-                    }
+                    if name == "peridot-config.yaml" =>
+                        {
+                            let path = PathBuf::from("/peridot_conf.yaml");
+                            info!("Writing Peridot OCI config to {path:?}");
+                            File::create(&path)
+                                .context("failed to create peridot config files").unwrap()
+                                .write_all(&artifact.layer)
+                                .context("failed to write peridot config file")?;
+                            return Ok(PeridotConfig::new("/peridot_conf.yaml").unwrap());
+                        }
                     MediaType::Other(name)
-                        if name == "application/vnd.wasm.content.layer.v1+wasm" =>
-                    {
-                        info!(
+                    if name == "application/vnd.wasm.content.layer.v1+wasm" =>
+                        {
+                            info!(
                             "This is the WASM layer! Size = {:?}",
                             artifact.layer.len(),
                         );
-                    }
+                        }
                     _ => {
                         debug!("<<< unknown media type {:?}", artifact.config.media_type());
                     }
