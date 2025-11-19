@@ -1,3 +1,3 @@
-pub mod instance;
+pub mod engine;
 
-pub use instance::PeridotShim;
+pub use engine::PeridotShim;
