@@ -308,7 +308,7 @@ pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotCon
                     if name == "peridot-config.yaml" =>
                         {
                             let path = PathBuf::from("/peridot_conf.yaml");
-                            info!("Writing Peridot OCI config to {path:?}");
+                            println!("Writing Peridot OCI config to {path:?}");
                             File::create(&path)
                                 .context("failed to create peridot config files").unwrap()
                                 .write_all(&artifact.layer)
@@ -318,12 +318,13 @@ pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotCon
                     MediaType::Other(name)
                     if name == "application/vnd.wasm.content.layer.v1+wasm" =>
                         {
-                            info!(
+                            println!(
                             "This is the WASM layer! Size = {:?}",
                             artifact.layer.len(),
                         );
                         }
                     _ => {
+                        println!("<<< unknown media type {:?}", artifact.config.media_type());
                         debug!("<<< unknown media type {:?}", artifact.config.media_type());
                     }
                 }
