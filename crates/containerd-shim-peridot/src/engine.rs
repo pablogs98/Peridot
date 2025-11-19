@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use containerd_shim_wasm::sandbox::context::{
     Entrypoint, RuntimeContext, WasmBinaryType, WasmLayer,
 };
@@ -85,7 +85,7 @@ impl Sandbox for PeridotSandbox {
 
             mp.lock()
                 .await
-                .spawn_metrics_update_thread(&peridot_config,"http://localhost:5501")
+                .spawn_metrics_update_thread(&peridot_config)
                 .await;
         }
 
@@ -291,17 +291,7 @@ impl IntoErrorCode for Result<()> {
 
 pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotConfig> {
     match ctx.entrypoint().source {
-        containerd_shim_wasm::sandbox::context::Source::File(_) => Ok(PeridotConfig {
-            args: vec![],
-            io: IoConfig {
-                demand: -1f64,
-                max_bandwidth: -1f64,
-            },
-            cpu: CpuConfig {
-                demand: -1f64,
-                utilization: -1f64,
-            },
-        }),
+        containerd_shim_wasm::sandbox::context::Source::File(_) => Err(anyhow!("Not implemented")),
 
         containerd_shim_wasm::sandbox::context::Source::Oci(layers) => {
             info!(" >>> configuring spin oci application {}", layers.len());

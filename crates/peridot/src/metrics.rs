@@ -59,8 +59,8 @@ impl MetricsPublisher {
 
     /// Spawns a thread that periodically collects metrics and sends them to the overseer.
     /// Updates items that implement the [MetricsSubscriber] trait with the received metrics.
-    pub async fn spawn_metrics_update_thread(&mut self, conf: &PeridotConfig, overseer_address: &str) {
-        let client = OverseerGrpcClient::new(overseer_address).await;
+    pub async fn spawn_metrics_update_thread(&mut self, conf: &PeridotConfig) {
+        let client = OverseerGrpcClient::new(conf.overseer_address.as_str()).await;
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx = Some(tx);
 
