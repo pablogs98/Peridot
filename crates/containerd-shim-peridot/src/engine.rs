@@ -134,8 +134,6 @@ impl Sandbox for PeridotSandbox {
 
             println!("It's a file");
 
-            Sandbox::can_handle(self, ctx).await.expect("Failed in can_handle");
-
             Ok(())
         }
     }
