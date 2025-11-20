@@ -13,6 +13,7 @@ use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher, MetricsSubscribe
 #[cfg(feature = "token")]
 use peridot::token::TokenBucket;
 use std::fs::File;
+use std::future::Future;
 use std::hash::Hash;
 use std::io::Write;
 use std::path::PathBuf;
@@ -72,6 +73,7 @@ impl Shim for PeridotShim {
 
     fn supported_layers_types() -> &'static [&'static str] {
         &[
+            "application/vnd.bytecodealliance.wasm.component.layer.v0+wasm",
             oci_wasm::WASM_LAYER_MEDIA_TYPE,
             constants::OCI_LAYER_MEDIA_TYPE_PERIDOT_CONFIG,
         ]
