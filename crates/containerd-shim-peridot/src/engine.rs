@@ -1,7 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
-use containerd_shim_wasm::sandbox::context::{
-    Entrypoint, RuntimeContext, WasmBinaryType, WasmLayer,
-};
+use containerd_shim_wasm::sandbox::context::{Entrypoint, RuntimeContext, Source, WasmBinaryType, WasmLayer};
 use containerd_shim_wasm::sandbox::Sandbox;
 use containerd_shim_wasm::shim::{version, Compiler, Shim, Version};
 use log::{debug, info};
@@ -118,6 +116,33 @@ impl Sandbox for PeridotSandbox {
         }
 
         result
+    }
+
+    fn can_handle(&self, ctx: &impl RuntimeContext) -> impl Future<Output=Result<()>> + Send {
+
+        // this async block is required to make the rewrite of trait_variant happy
+        async move {
+            println!("Reached this.");
+            let source = ctx.entrypoint().source;
+
+            let path = match source {
+                Source::File(path) => path,
+                Source::Oci(_) => return Ok(()),
+            };
+
+            println!("It's a file");
+
+            let mut buffer = [0; 4];
+            File::open(&path)?.read_exact(&mut buffer)?;
+
+            if buffer.as_slice() != b"\0asm" {
+                println!("WAT");
+            }
+
+            Sandbox::can_handle(self, ctx).await.expect("Failed in can_handle");
+
+            Ok(())
+        }
     }
 }
 
