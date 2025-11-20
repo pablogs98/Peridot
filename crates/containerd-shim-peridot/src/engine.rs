@@ -70,6 +70,8 @@ impl Shim for PeridotShim {
     }
 
     fn supported_layers_types() -> &'static [&'static str] {
+        println!("Returning supported layer types for PeridotShim");
+        
         &[
             "application/vnd.bytecodealliance.wasm.component.layer.v0+wasm",
             oci_wasm::WASM_LAYER_MEDIA_TYPE,
