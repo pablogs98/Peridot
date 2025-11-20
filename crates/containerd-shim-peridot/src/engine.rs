@@ -74,7 +74,7 @@ impl Shim for PeridotShim {
 
         &[
             "application/vnd.bytecodealliance.wasm.component.layer.v0+wasm",
-            oci_wasm::WASM_LAYER_MEDIA_TYPE,
+            "application/wasm",
             constants::OCI_LAYER_MEDIA_TYPE_PERIDOT_CONFIG,
         ]
     }
@@ -118,24 +118,6 @@ impl Sandbox for PeridotSandbox {
         }
 
         result
-    }
-
-    fn can_handle(&self, ctx: &impl RuntimeContext) -> impl Future<Output=Result<()>> + Send {
-
-        // this async block is required to make the rewrite of trait_variant happy
-        async move {
-            println!("Reached this.");
-            let source = ctx.entrypoint().source;
-
-            let path = match source {
-                Source::File(path) => path,
-                Source::Oci(_) => return Ok(()),
-            };
-
-            println!("It's a file");
-
-            Ok(())
-        }
     }
 }
 
