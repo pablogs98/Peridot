@@ -71,7 +71,7 @@ impl Shim for PeridotShim {
 
     fn supported_layers_types() -> &'static [&'static str] {
         println!("Returning supported layer types for PeridotShim");
-        
+
         &[
             "application/vnd.bytecodealliance.wasm.component.layer.v0+wasm",
             oci_wasm::WASM_LAYER_MEDIA_TYPE,
@@ -133,13 +133,6 @@ impl Sandbox for PeridotSandbox {
             };
 
             println!("It's a file");
-
-            let mut buffer = [0; 4];
-            File::open(&path)?.read_exact(&mut buffer)?;
-
-            if buffer.as_slice() != b"\0asm" {
-                println!("WAT");
-            }
 
             Sandbox::can_handle(self, ctx).await.expect("Failed in can_handle");
 
