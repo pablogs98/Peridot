@@ -143,8 +143,8 @@ impl Compiler for PeridotCompiler {
                         info!("Layer already precompiled {:?}", wasm_layer.config.digest());
                         Ok(Some(wasm_layer.layer))
                     } else {
-                        let precompiled: Option<Vec<u8>> = match WasmBinaryType::from_bytes(&layer.layer) {
-                            Some(WasmBinaryType::Module) => Some(self.0.precompile_module(&layer.layer)?),
+                        let precompiled: Option<Vec<u8>> = match WasmBinaryType::from_bytes(&wasm_layer.layer) {
+                            Some(WasmBinaryType::Module) => Some(self.0.precompile_module(&wasm_layer.layer)?),
                             Some(WasmBinaryType::Component) => {
                                 error!("Peridot does not support precompilation of components yet");
                                 None
@@ -168,6 +168,7 @@ impl Compiler for PeridotCompiler {
 pub(crate) fn is_wasm_content(layer: &WasmLayer) -> Option<WasmLayer> {
     if let MediaType::Other(name) = layer.config.media_type() {
         if name == constants::OCI_LAYER_MEDIA_TYPE_WASM {
+            info!("WASM layer {:?} is Wasm, Type={:?}", layer.config.digest(), name);
             return Some(layer.clone());
         }
     }
