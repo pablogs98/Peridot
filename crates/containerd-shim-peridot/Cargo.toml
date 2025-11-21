@@ -7,7 +7,6 @@ edition.workspace = true
 [patch.crates-io]
 oci-spec = "0.8.3"
 
-
 [dependencies.containerd-shim-wasm]
 git = "https://github.com/miqalvarez/runwasi"
 
@@ -15,13 +14,11 @@ git = "https://github.com/miqalvarez/runwasi"
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
 log = { workspace = true }
-env_logger = "0.11.8"
 anyhow = { workspace = true }
 tokio = { workspace = true }
 peridot = { workspace = true }
 peridot-token-ctx = {path = "../contexts/peridot-token-ctx", optional = true}
 oci-spec = "0.8.3"
-oci-wasm = "0.3.0"
 
 [features]
 token = ["dep:peridot-token-ctx"]

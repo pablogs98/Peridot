@@ -1,1 +1,1 @@
-pub(crate) const OCI_LAYER_MEDIA_TYPE_PERIDOT_CONFIG: &str = "vnd.peridot.image.layer.v1+json";
+pub(crate) const OCI_LAYER_MEDIA_TYPE_PERIDOT_CONFIG: &str = "application/vnd.peridot.image.layer.v1+json";
