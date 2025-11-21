@@ -70,8 +70,6 @@ impl Shim for PeridotShim {
     }
 
     fn supported_layers_types() -> &'static [&'static str] {
-        println!("Returning supported layer types for PeridotShim");
-
         &[
             constants::OCI_LAYER_MEDIA_TYPE_WASM,
             "application/wasm",
@@ -326,19 +324,13 @@ pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotCon
         Source::File(_) => Err(anyhow!("Not implemented")),
 
         Source::Oci(layers) => {
-            println!(" >>> configuring oci application {}", layers.len());
-
-            for layer in layers {
-                println!("<<< layer config: {:?}", layer.config);
-            }
-
             for artifact in layers {
                 match artifact.config.media_type() {
                     MediaType::Other(name)
-                        if name == "application/vnd.wasm.content.layer.v1+wasm" =>
+                        if name == constants::OCI_LAYER_MEDIA_TYPE_PERIDOT_CONFIG =>
                     {
                         let path = PathBuf::from("/peridot_conf.yaml");
-                        println!("Writing Peridot OCI config to {path:?}");
+                        info!("Writing Peridot OCI config to {path:?}");
                         File::create(&path)
                             .context("failed to create peridot config files")
                             .unwrap()
@@ -348,12 +340,11 @@ pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotCon
                     }
                     MediaType::Other(name)
                         if name
-                            == "application/vnd.bytecodealliance.wasm.component.layer.v0+wasm" =>
+                            == constants::OCI_LAYER_MEDIA_TYPE_WASM =>
                     {
-                        println!("This is the WASM layer! Size = {:?}", artifact.layer.len(),);
+                        debug!("This is the WASM layer! Size = {:?}", artifact.layer.len(),);
                     }
                     _ => {
-                        println!("<<< unknown media type {:?}", artifact.config.media_type());
                         debug!("<<< unknown media type {:?}", artifact.config.media_type());
                     }
                 }
