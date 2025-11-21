@@ -119,6 +119,10 @@ impl Sandbox for PeridotSandbox {
 
         result
     }
+
+    async fn can_handle(&self, _ctx: &impl RuntimeContext) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl Compiler for PeridotCompiler {
