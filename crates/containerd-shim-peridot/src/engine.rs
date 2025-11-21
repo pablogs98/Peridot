@@ -11,7 +11,6 @@ use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher, MetricsSubscribe
 #[cfg(feature = "token")]
 use peridot::token::TokenBucket;
 use std::fs::File;
-use std::future::Future;
 use std::hash::Hash;
 use std::io::Write;
 use std::path::PathBuf;
@@ -82,9 +81,7 @@ impl Sandbox for PeridotSandbox {
     async fn run_wasi(&self, ctx: &impl RuntimeContext) -> Result<i32> {
         info!("Setting up wasi");
 
-        let peridot_config = load_peridot_config(ctx)
-            .await
-            .expect("Failed to create peridot config");
+        let peridot_config = load_peridot_config(ctx).await?;
 
         // Subscribe metrics producers and start metrics update thread
         if let Some(mp) = self.metrics_publisher.as_ref() {
@@ -152,13 +149,12 @@ impl Compiler for PeridotCompiler {
                                 None
                             }
                         };
-
                         Ok(precompiled)
                     }
                 }
                 None => Ok(None),
             })
-            .collect::<anyhow::Result<_>>()?;
+            .collect::<Result<_>>()?;
         Ok(precompiled_layers)
     }
 }
@@ -332,11 +328,10 @@ pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotCon
                         let path = PathBuf::from("/peridot_conf.yaml");
                         info!("Writing Peridot OCI config to {path:?}");
                         File::create(&path)
-                            .context("failed to create peridot config files")
-                            .unwrap()
+                            .context("failed to create peridot config files")?
                             .write_all(&artifact.layer)
                             .context("failed to write peridot config file")?;
-                        return Ok(PeridotConfig::new("/peridot_conf.yaml").unwrap());
+                        return Ok(PeridotConfig::new("/peridot_conf.yaml")?);
                     }
                     MediaType::Other(name)
                         if name

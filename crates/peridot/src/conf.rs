@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
+use anyhow::Result;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct PeridotConfig {
@@ -29,7 +30,7 @@ pub struct PeridotConfigInner {
 }
 
 impl PeridotConfig {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<PeridotConfig, Box<dyn std::error::Error>> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<PeridotConfig> {
         let contents = fs::read_to_string(path)?;
         let config: PeridotConfig = serde_yaml::from_str(&contents)?;
         Ok(config)
