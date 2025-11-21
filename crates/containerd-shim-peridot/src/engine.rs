@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use containerd_shim_wasm::sandbox::context::{Entrypoint, RuntimeContext, Source, WasmBinaryType, WasmLayer};
 use containerd_shim_wasm::sandbox::Sandbox;
 use containerd_shim_wasm::shim::{version, Compiler, Shim, Version};
-use log::{debug, info};
+use log::{debug, error, info};
 use oci_spec::image::MediaType;
 use peridot::conf::PeridotConfig;
 use peridot::context;
@@ -73,7 +73,7 @@ impl Shim for PeridotShim {
         println!("Returning supported layer types for PeridotShim");
 
         &[
-            "application/vnd.bytecodealliance.wasm.component.layer.v0+wasm",
+            constants::OCI_LAYER_MEDIA_TYPE_WASM,
             "application/wasm",
             constants::OCI_LAYER_MEDIA_TYPE_PERIDOT_CONFIG,
         ]
@@ -131,31 +131,47 @@ impl Compiler for PeridotCompiler {
     }
 
     async fn compile(&self, layers: &[WasmLayer]) -> Result<Vec<Option<Vec<u8>>>> {
-        let mut compiled_layers = Vec::<Option<Vec<u8>>>::with_capacity(layers.len());
+        let precompiled_layers = layers
+            .iter()
+            .map(|layer| match is_wasm_content(layer) {
+                Some(wasm_layer) => {
+                    info!(
+                        "Precompiling wasm layer {:?}",
+                        wasm_layer.config.digest()
+                    );
+                    if Engine::detect_precompiled(&wasm_layer.layer).is_some() {
+                        info!("Layer already precompiled {:?}", wasm_layer.config.digest());
+                        Ok(Some(wasm_layer.layer))
+                    } else {
+                        let precompiled: Option<Vec<u8>> = match WasmBinaryType::from_bytes(&layer.layer) {
+                            Some(WasmBinaryType::Module) => Some(self.0.precompile_module(&layer.layer)?),
+                            Some(WasmBinaryType::Component) => {
+                                error!("Peridot does not support precompilation of components yet");
+                                None
+                            }
+                            None => {
+                                error!("Unknown WASM binary type");
+                                None
+                            }
+                        };
 
-        for layer in layers {
-            if Engine::detect_precompiled(&layer.layer).is_some() {
-                info!("Already precompiled");
-                compiled_layers.push(None);
-                continue;
-            }
-
-            let compiled_layer = match WasmBinaryType::from_bytes(&layer.layer) {
-                Some(WasmBinaryType::Module) => self.0.precompile_module(&layer.layer)?,
-                Some(WasmBinaryType::Component) => {
-                    bail!("Peridot does not support precompilation of components yet")
+                        Ok(precompiled)
+                    }
                 }
-                None => {
-                    log::warn!("Unknown WASM binary type");
-                    continue;
-                }
-            };
-
-            compiled_layers.push(Some(compiled_layer));
-        }
-
-        Ok(compiled_layers)
+                None => Ok(None),
+            })
+            .collect::<anyhow::Result<_>>()?;
+        Ok(precompiled_layers)
     }
+}
+
+pub(crate) fn is_wasm_content(layer: &WasmLayer) -> Option<WasmLayer> {
+    if let MediaType::Other(name) = layer.config.media_type() {
+        if name == constants::OCI_LAYER_MEDIA_TYPE_WASM {
+            return Some(layer.clone());
+        }
+    }
+    None
 }
 
 impl PeridotSandbox {
@@ -306,9 +322,9 @@ impl IntoErrorCode for Result<()> {
 
 pub async fn load_peridot_config(ctx: &impl RuntimeContext) -> Result<PeridotConfig> {
     match ctx.entrypoint().source {
-        containerd_shim_wasm::sandbox::context::Source::File(_) => Err(anyhow!("Not implemented")),
+        Source::File(_) => Err(anyhow!("Not implemented")),
 
-        containerd_shim_wasm::sandbox::context::Source::Oci(layers) => {
+        Source::Oci(layers) => {
             println!(" >>> configuring oci application {}", layers.len());
 
             for layer in layers {
