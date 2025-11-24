@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use containerd_shim_wasm::sandbox::context::{Entrypoint, RuntimeContext, Source, WasmBinaryType, WasmLayer};
 use containerd_shim_wasm::sandbox::Sandbox;
 use containerd_shim_wasm::shim::{version, Compiler, Shim, Version};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use oci_spec::image::MediaType;
 use peridot::conf::PeridotConfig;
 use peridot::context;
@@ -89,10 +89,18 @@ impl Sandbox for PeridotSandbox {
                 .await
                 .subscribe_producer(Arc::new(DiskIOMetricsProducer {}));
 
-            mp.lock()
+            match mp.lock()
                 .await
                 .spawn_metrics_update_thread(&peridot_config)
-                .await?;
+                .await {
+                Ok(()) => {
+                    info!("Metrics update thread started");
+                }
+                Err(e) => {
+                    warn!("Failed to start metrics update thread. Overseer will be unavailable: {}", e);
+                }
+
+            }
         }
 
         let Entrypoint {

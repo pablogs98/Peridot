@@ -8,6 +8,7 @@ use std::{fs, time};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 use anyhow::{anyhow, Result};
+use log::warn;
 
 /// [MetricsSubscriber] is a trait that defines the behavior of an object that can receive metric updates.
 /// [MetricsSubscriber]s subscribe to a [MetricsPublisher] to receive updates.
@@ -70,7 +71,7 @@ impl MetricsPublisher {
             Ok(client) => client,
             Err(e) => {
                 let error = format!("Failed to create grpc client: {}", e.to_string());
-                Err(anyhow!(error))?
+                return Err(anyhow!(error));
             }
         };
 
@@ -110,14 +111,14 @@ impl MetricsPublisher {
                             let subs = subscribers.read().unwrap();
                             for subscriber in subs.iter() {
                                 let mut s = subscriber.lock().unwrap();
-                                println!(
+                                warn!(
                                     "Overseer updating subscriber with metrics: {:?}",
                                     &received_metrics
                                 );
                                 s.update(&received_metrics);
                             }
                         } else {
-                            log::warn!(
+                            warn!(
                                 "No metrics received from overseer for module ID: {}",
                                 &module_id
                             );
@@ -134,7 +135,7 @@ impl MetricsPublisher {
             }
             Err(status) => {
                 Err(anyhow!(
-                    "Failed to register module, overseer will be unavailable. Status: {}",
+                    "Failed to register module. Status: {}",
                     status
                 ))
             }

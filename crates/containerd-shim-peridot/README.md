@@ -17,12 +17,11 @@ cargo install oci-tar-builder
 Use `oci-tar-builder` to create an OCI image. The image must contain the `peridot-config.yaml` configuration file.  Assuming the Wasm module is named `wasi-module.wasm`:
 
 ```shell
-bin oci-tar-builder -- \
-    --name wasi-helloworld \
-    --repo localhost:5000 \
-    --tag latest --module wasi-helloworld.wasm \
-    --layer peridot-config.yaml \
-    -o hello-oci.tar
+oci-tar-builder --name wasi-helloworld-oci \
+                --repo ghcr.io/pablogs98/peridot \
+                --tag latest --module hello.wasm \
+                --layer application/vnd.peridot.image.layer.v1+json=peridot-config.yaml \
+                -o hello-oci.tar
 ```
 
 The previous command assumes your container registry is running at `localhost:5000`. You can either use a remote repository or, for instance, set up one locally:
