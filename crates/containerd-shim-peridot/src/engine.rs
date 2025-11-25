@@ -19,7 +19,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
 use wasmtime_wasi::WasiCtxBuilder;
-
+use peridot_counter_ctx::{PeridotCounter, PeridotCounterCtx};
 use crate::constants;
 #[cfg(feature = "token")]
 use peridot_token_ctx::PeridotTokenCtx;
@@ -200,7 +200,7 @@ impl PeridotSandbox {
     ) -> Result<i32> {
         debug!("execute module");
 
-        let ctx_p1 = wasi_builder(ctx)?.build_p1();
+        let ctx_p1 = wasi_builder(ctx, config)?.build_p1();
         let mut module_linker = Linker::new(&self.engine);
         debug!("init linker");
 
@@ -218,16 +218,30 @@ impl PeridotSandbox {
             context::PeridotContext::new(ctx_p1),
             Arc::clone(&token_bucket),
         );
+
+        #[cfg(feature = "counter")]
+        let counter = Arc::new(PeridotCounter::new());
+        
+        #[cfg(feature = "counter")]
+        let peridot_ctx = PeridotCounterCtx::new(context::PeridotContext::new(ctx_p1), counter);
+        
         #[cfg(feature = "token")]
         context::add_to_linker_async(
             &mut module_linker,
             |wasi_ctx: &mut WasiWrapper<PeridotTokenCtx>| wasi_ctx,
+        )?;
+        
+        #[cfg(feature = "counter")]
+        context::add_to_linker_async(
+            &mut module_linker,
+            |wasi_ctx: &mut WasiWrapper<PeridotCounterCtx>| wasi_ctx,
         )?;
 
         let wrapped_ctx = WasiWrapper::new(peridot_ctx);
 
         let mut store = Store::new(&self.engine, wrapped_ctx);
 
+        #[cfg(feature = "token")]
         let token_bucket =
             token_bucket as Arc<std::sync::Mutex<dyn MetricsSubscriber + Send + Sync>>;
 
@@ -299,16 +313,17 @@ pub(crate) fn envs_from_ctx(ctx: &impl RuntimeContext) -> Vec<(String, String)> 
         .collect()
 }
 
-fn wasi_builder(ctx: &impl RuntimeContext) -> Result<WasiCtxBuilder, anyhow::Error> {
+fn wasi_builder(ctx: &impl RuntimeContext, config: PeridotConfig) -> Result<WasiCtxBuilder, anyhow::Error> {
     debug!("building WASI context");
 
     let file_perms = wasmtime_wasi::FilePerms::all();
     let dir_perms = wasmtime_wasi::DirPerms::all();
     let envs = envs_from_ctx(ctx);
+    let args: Vec<String> = config.args.clone();
 
     let mut builder = WasiCtxBuilder::new();
     builder
-        .args(ctx.args())
+        .args(&*args)
         .envs(&envs)
         .inherit_stdio()
         .preopened_dir("/", "/", dir_perms, file_perms)?;
