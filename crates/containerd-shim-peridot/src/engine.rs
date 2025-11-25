@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use anyhow::{anyhow, bail, Context, Result};
 use containerd_shim_wasm::sandbox::context::{Entrypoint, RuntimeContext, Source, WasmBinaryType, WasmLayer};
 use containerd_shim_wasm::sandbox::Sandbox;
@@ -110,7 +111,19 @@ impl Sandbox for PeridotSandbox {
             name: _,
         } = ctx.entrypoint();
 
-        let wasm_bytes = &source.as_bytes()?;
+        let wasm_bytes = match source {
+            Source::File(_path) => {
+                bail!("File source is not supported yet for Peridot shim");
+            },
+            Source::Oci(layers) => {
+                let module = layers
+                    .iter()
+                    .find(|module| is_wasm_content(module).is_some())
+                    .context("No WASM module found in OCI layers")?;
+                &module.layer
+            }
+        };
+
         let result = self
             .execute(ctx, peridot_config, wasm_bytes, func)
             .await
