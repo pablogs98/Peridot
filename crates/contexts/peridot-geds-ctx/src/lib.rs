@@ -1,14 +1,22 @@
-use geds_rs::{GEDSFile, GEDS};
-use log::{error, info};
-use std::collections::BTreeMap;
-use std::ops::{Deref, DerefMut};
+use aes_gcm::{
+    aead::{Aead, AeadCore, KeyInit},
+    Aes256Gcm,
+    Key,
+    Nonce,
+};
 use async_trait::async_trait;
-use wasmtime_wasi::p1::types::{CiovecArray, Errno, Error, Fd, Fdflags, Filesize, IovecArray, Lookupflags, Oflags, Rights, Size};
-use wasmtime_wasi::p1::wasi_snapshot_preview1::WasiSnapshotPreview1;
-use wasmtime_wasi::p1::{wasi_snapshot_preview1, WasiP1Ctx};
-use wiggle::{GuestError, GuestMemory, GuestPtr};
+use geds_rs::{GEDSFile, GEDS};
+use hex::decode;
+use log::{error, info};
 use peridot::context::{DelegatingWasiCtx, PeridotContext};
-
+use std::collections::BTreeMap;
+use std::env;
+use std::ops::{Deref, DerefMut};
+use wasmtime_wasi::p1::types::{
+    CiovecArray, Errno, Error, Fd, Fdflags, Filesize, IovecArray, Lookupflags, Oflags, Rights, Size,
+};
+use wasmtime_wasi::p1::WasiP1Ctx;
+use wiggle::{GuestError, GuestMemory, GuestPtr};
 
 #[derive(Default)]
 struct GEDSDescriptors {
@@ -77,10 +85,24 @@ impl GEDSDescriptors {
     }
 }
 
+fn create_cipher() -> anyhow::Result<Aes256Gcm> {
+    let key_bytes;
+    let key = match env::var("GEDS_CIPHER_KEY") {
+        Ok(key) => {
+            key_bytes = decode(key)?;
+            Key::<Aes256Gcm>::from_slice(&key_bytes)
+        },
+        Err(_) => &Aes256Gcm::generate_key().unwrap(),
+    };
+    let cipher = Aes256Gcm::new(key);
+    Ok(cipher)
+}
+
 pub struct PeridotGEDSCtx {
     inner: PeridotContext,
     geds: Option<GEDS>,
     geds_descriptors: GEDSDescriptors,
+    cipher: Aes256Gcm,
 }
 impl PeridotGEDSCtx {
     pub fn new(inner: PeridotContext) -> Self {
@@ -107,42 +129,40 @@ impl PeridotGEDSCtx {
             }
             opt = Some(geds);
         }
+
         info!("Initialization complete!");
         Self {
             inner,
             geds: opt,
             geds_descriptors: GEDSDescriptors::new(),
+            cipher: create_cipher().unwrap()
         }
     }
 }
-
 
 #[async_trait]
 impl DelegatingWasiCtx for PeridotGEDSCtx {
     fn inner(&mut self) -> &mut WasiP1Ctx {
         self.inner.inner()
     }
-    
+
     async fn fd_close(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
-        println!("Closing file");
         if self.geds_descriptors.contains_key(&u32::from(fd)) {
-            println!("Closing GEDS file");
             self.geds_descriptors.remove(fd);
             self.geds.as_ref().unwrap().relocate(true);
-             return Ok(());
+            return Ok(());
         }
         self.inner.fd_close(mem, fd).await
     }
 
     async fn fd_datasync(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
         if self.geds_descriptors.contains_key(&u32::from(fd)) {
-            println!("Datasyinncccc");
             self.geds.as_ref().unwrap().relocate(true);
             return Ok(());
         }
         self.inner.fd_datasync(mem, fd).await
     }
-    
+
     async fn fd_pread(
         &mut self,
         mem: &mut GuestMemory<'_>,
@@ -154,8 +174,7 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
             let geds_file = self.geds_descriptors.get(&u32::from(fd)).unwrap();
             let mut buf: Vec<u8> = vec![0; iovs.len() as usize];
             let len = buf.len();
-            return match geds_file.read(&mut buf, offset.try_into().unwrap(), len)
-            {
+            return match geds_file.read(&mut buf, offset.try_into().unwrap(), len) {
                 Ok(size) => Ok(u32::try_from(size)?),
                 Err(e) => {
                     error!("Error reading file: {}", e);
@@ -178,10 +197,12 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
             let buf = first_non_empty_ciovec(mem, iovs)?;
             let buf = mem.to_vec(buf)?;
 
-            return match geds_file.write(&buf, 0, buf.len()) {
-                Ok(()) => Ok(u32::try_from(buf.len())?),
+            let nonce = Aes256Gcm::generate_nonce().unwrap();
+            let encrypted_buf = self.cipher.encrypt(&nonce, buf.as_slice()).unwrap();
+
+            return match geds_file.write(&encrypted_buf, 0, encrypted_buf.len()) {
+                Ok(()) => Ok(u32::try_from(encrypted_buf.len())?),
                 Err(e) => {
-                    println!("Error fd_write: {}", e);
                     Err(Errno::Fault.into())
                 }
             };
@@ -200,15 +221,17 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
             let buf = first_non_empty_ciovec(mem, iovs)?;
             let buf = mem.to_vec(buf)?;
 
-            return match geds_file.write(&buf, 0, buf.len()) {
-                Ok(()) => Ok(u32::try_from(buf.len())?),
+            let nonce = Aes256Gcm::generate_nonce().unwrap();
+            let encrypted_buf = self.cipher.encrypt(&nonce, buf.as_slice()).unwrap();
+
+            return match geds_file.write(&encrypted_buf, 0, encrypted_buf.len()) {
+                Ok(()) => Ok(u32::try_from(encrypted_buf.len())?),
                 Err(e) => {
-                    println!("Error fd_write: {}", e);
                     Err(Errno::Fault.into())
                 }
             };
         }
-        self.inner.fd_write( mem, fd, iovs).await
+        self.inner.fd_write(mem, fd, iovs).await
     }
 
     async fn path_open(
@@ -223,18 +246,13 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
         fdflags: Fdflags,
     ) -> Result<Fd, Error> {
         let str_path = read_string(mem, path)?;
-        println!("Opening: {}", str_path);
 
         if let Some(start) = str_path.find("geds://") {
             let str_path = &str_path[start + 7..]; // Extrae lo que hay después de "geds://"
-            println!("Extracted path: {}", str_path);
 
             let mut parts = str_path.splitn(2, '/'); // Divide solo en 2 partes (bucket y el resto)
             let bucket = parts.next().unwrap_or_default();
             let key = parts.next().unwrap_or_default();
-
-            println!("Bucket: {}", bucket);
-            println!("Key: {}", key);
 
             let result;
             if oflags.contains(Oflags::CREAT) {
@@ -245,29 +263,26 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
 
             return match result {
                 Ok(file) => {
-                    let fd = self
-                        .geds_descriptors
-                        .push(file)
-                        .unwrap();
+                    let fd = self.geds_descriptors.push(file).unwrap();
                     Ok(fd.into())
                 }
-                ,
                 Err(e) => {
                     error!("Could not open GEDSFile: {}", e);
                     Err(Errno::Noent.into())
                 }
             };
         }
-        self.inner.path_open(
-            mem,
-            fd,
-            dirflags,
-            path,
-            oflags,
-            fs_rights_base,
-            fs_rights_inheriting,
-            fdflags,
-        )
+        self.inner
+            .path_open(
+                mem,
+                fd,
+                dirflags,
+                path,
+                oflags,
+                fs_rights_base,
+                fs_rights_inheriting,
+                fdflags,
+            )
             .await
     }
 
@@ -291,7 +306,7 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
                 }
             };
         }
-        self.inner.path_unlink_file( mem, fd, path).await
+        self.inner.path_unlink_file(mem, fd, path).await
     }
 }
 
