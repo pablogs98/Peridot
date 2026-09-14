@@ -1,8 +1,22 @@
+# Rust
 /target
-/.idea/modules.xml
-/.idea/Peridot.iml
-/.idea/vcs.xml
-/.idea/.gitignore
 target
 /crates/peridot/target/
+
+# The root Cargo.lock is deliberately tracked: a plugin and the runtime that loads it must
+# resolve against one identical lockfile, so it is part of the plugin contract, not just
+# hygiene. Per-member lockfiles are not — they only appear when a crate is built outside the
+# workspace, which is exactly what the plugin ABI forbids.
+crates/**/Cargo.lock
+
+# CMake output from the c-wasm guest modules. CMakeLists.txt files are tracked; everything
+# CMake generates from them is not.
 cmake-build*
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Editors and OS
+.idea/
+.DS_Store
