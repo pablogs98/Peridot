@@ -18,7 +18,32 @@ members = [
     "crates/contexts/peridot-batch-ctx",
     "crates/contexts/peridot-syscall-batching-ctx",
     "crates/contexts/peridot-token-ctx",
-    "crates/contexts/peridot-counter-ctx"
+    "crates/contexts/peridot-counter-ctx",
+    "crates/plugins/peridot-trace-plugin",
+]
+
+# What a bare `cargo build` builds. Two members are left out because they cannot be built
+# everywhere, and both stay full members so that `cargo build -p <name>` still resolves them
+# against this workspace's single Cargo.lock — which is what the plugin ABI requires:
+#
+#   peridot-geds-ctx        needs a native IBM GEDS installation; its `geds_rs` dependency ships
+#                           commented out, so it does not compile without one.
+#   containerd-shim-peridot pulls `procfs` via libcgroups/libcontainer, which is Linux-only.
+#
+# Build either explicitly, e.g. `cargo build --release -p peridot-cli -p peridot-geds-ctx`.
+default-members = [
+    ".",
+    "crates/peridot",
+    "crates/peridot-overseer",
+    "crates/peridot-overseer-grpc",
+    "crates/contexts/imagenet-preprocessing",
+    "crates/contexts/peridot-clock-ctx",
+    "crates/contexts/peridot-s3-ctx",
+    "crates/contexts/peridot-batch-ctx",
+    "crates/contexts/peridot-syscall-batching-ctx",
+    "crates/contexts/peridot-token-ctx",
+    "crates/contexts/peridot-counter-ctx",
+    "crates/plugins/peridot-trace-plugin",
 ]
 
 [workspace.package]
@@ -51,11 +76,12 @@ async-trait = "0.1.85"
 
 [dependencies]
 nix = { version = "0.29.0", features = ["process"] }
-peridot-token-ctx = { path = "crates/contexts/peridot-token-ctx", optional = true }
-peridot-geds-ctx = { path = "crates/contexts/peridot-geds-ctx", optional = true }
-peridot-clock-ctx = { path = "crates/contexts/peridot-clock-ctx", optional = true }
-peridot-s3-ctx = { path = "crates/contexts/peridot-s3-ctx", optional = true }
-peridot-counter-ctx = { path = "crates/contexts/peridot-counter-ctx", optional = true }
+peridot-token-ctx = { path = "crates/contexts/peridot-token-ctx" }
+peridot-clock-ctx = { path = "crates/contexts/peridot-clock-ctx" }
+peridot-s3-ctx = { path = "crates/contexts/peridot-s3-ctx" }
+peridot-counter-ctx = { path = "crates/contexts/peridot-counter-ctx" }
+peridot-batch-ctx = { path = "crates/contexts/peridot-batch-ctx" }
+peridot-syscall-batching-ctx = { path = "crates/contexts/peridot-syscall-batching-ctx" }
 wasmtime-wasi = { workspace = true }
 
 wasmtime = { workspace = true }
@@ -63,11 +89,8 @@ clap = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 peridot = { workspace = true }
-tokio = { version = "1.48.0", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { workspace = true }
 
-[features]
-token = ["dep:peridot-token-ctx"]
-s3 = ["dep:peridot-s3-ctx"]
-geds = ["dep:peridot-geds-ctx"]
-clock = ["dep:peridot-clock-ctx"]
-counter = ["dep:peridot-counter-ctx"]
+# No features. Contexts are selected at run time through the `contexts` list in the
+# configuration file, and anything not built into this binary — GEDS included — is loaded from a
+# plugin library named in `plugins`.

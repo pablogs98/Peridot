@@ -8,15 +8,16 @@ use async_trait::async_trait;
 use geds_rs::{GEDSFile, GEDS};
 use hex::decode;
 use log::{error, info};
-use peridot::context::{DelegatingWasiCtx, PeridotContext};
+use peridot::context::DelegatingWasiCtx;
+use peridot::plugin::{BoxedContextFuture, ContextConfig};
 use std::collections::BTreeMap;
 use std::env;
 use std::ops::{Deref, DerefMut};
 use wasmtime_wasi::p1::types::{
     CiovecArray, Errno, Error, Fd, Fdflags, Filesize, IovecArray, Lookupflags, Oflags, Rights, Size,
 };
-use wasmtime_wasi::p1::WasiP1Ctx;
-use wiggle::{GuestError, GuestMemory, GuestPtr};
+use peridot::memory;
+use wiggle::{GuestMemory, GuestPtr};
 
 #[derive(Default)]
 struct GEDSDescriptors {
@@ -99,13 +100,18 @@ fn create_cipher() -> anyhow::Result<Aes256Gcm> {
 }
 
 pub struct PeridotGEDSCtx {
-    inner: PeridotContext,
+    next: Box<dyn DelegatingWasiCtx>,
     geds: Option<GEDS>,
     geds_descriptors: GEDSDescriptors,
     cipher: Aes256Gcm,
 }
+/// Registry entry point. Registered under the name `geds`.
+pub fn factory(next: Box<dyn DelegatingWasiCtx>, _config: ContextConfig<'_>) -> BoxedContextFuture<'_> {
+    Box::pin(async move { Ok(Box::new(PeridotGEDSCtx::new(next)) as Box<dyn DelegatingWasiCtx>) })
+}
+
 impl PeridotGEDSCtx {
-    pub fn new(inner: PeridotContext) -> Self {
+    pub fn new(next: Box<dyn DelegatingWasiCtx>) -> Self {
         let mut config = GEDS::get_default_config();
         config.pub_sub_enabled = true;
         config.cache_objects_from_s3 = true;
@@ -132,7 +138,7 @@ impl PeridotGEDSCtx {
 
         info!("Initialization complete!");
         Self {
-            inner,
+            next,
             geds: opt,
             geds_descriptors: GEDSDescriptors::new(),
             cipher: create_cipher().unwrap()
@@ -142,8 +148,8 @@ impl PeridotGEDSCtx {
 
 #[async_trait]
 impl DelegatingWasiCtx for PeridotGEDSCtx {
-    fn inner(&mut self) -> &mut WasiP1Ctx {
-        self.inner.inner()
+    fn next(&mut self) -> Option<&mut dyn DelegatingWasiCtx> {
+        Some(&mut *self.next)
     }
 
     async fn fd_close(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
@@ -152,7 +158,7 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
             self.geds.as_ref().unwrap().relocate(true);
             return Ok(());
         }
-        self.inner.fd_close(mem, fd).await
+        self.next.fd_close(mem, fd).await
     }
 
     async fn fd_datasync(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
@@ -160,7 +166,7 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
             self.geds.as_ref().unwrap().relocate(true);
             return Ok(());
         }
-        self.inner.fd_datasync(mem, fd).await
+        self.next.fd_datasync(mem, fd).await
     }
 
     async fn fd_pread(
@@ -182,7 +188,7 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
                 }
             };
         }
-        self.inner.fd_pread(mem, fd, iovs, offset).await
+        self.next.fd_pread(mem, fd, iovs, offset).await
     }
 
     async fn fd_pwrite(
@@ -194,20 +200,18 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
     ) -> Result<Size, Error> {
         if self.geds_descriptors.contains_key(&u32::from(fd)) {
             let geds_file = self.geds_descriptors.get(&u32::from(fd)).unwrap();
-            let buf = first_non_empty_ciovec(mem, iovs)?;
-            let buf = mem.to_vec(buf)?;
+            // Consumed by encrypt before this call returns, so it can borrow guest memory.
+            let buf = memory::payload(mem, iovs)?;
 
             let nonce = Aes256Gcm::generate_nonce().unwrap();
-            let encrypted_buf = self.cipher.encrypt(&nonce, buf.as_slice()).unwrap();
+            let encrypted_buf = self.cipher.encrypt(&nonce, buf.as_ref()).unwrap();
 
             return match geds_file.write(&encrypted_buf, 0, encrypted_buf.len()) {
                 Ok(()) => Ok(u32::try_from(encrypted_buf.len())?),
-                Err(e) => {
-                    Err(Errno::Fault.into())
-                }
+                Err(_) => Err(Errno::Fault.into()),
             };
         }
-        self.inner.fd_pwrite(mem, fd, iovs, offset).await
+        self.next.fd_pwrite(mem, fd, iovs, offset).await
     }
 
     async fn fd_write(
@@ -218,20 +222,18 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
     ) -> Result<Size, Error> {
         if self.geds_descriptors.contains_key(&u32::from(fd)) {
             let geds_file = self.geds_descriptors.get(&u32::from(fd)).unwrap();
-            let buf = first_non_empty_ciovec(mem, iovs)?;
-            let buf = mem.to_vec(buf)?;
+            // Consumed by encrypt before this call returns, so it can borrow guest memory.
+            let buf = memory::payload(mem, iovs)?;
 
             let nonce = Aes256Gcm::generate_nonce().unwrap();
-            let encrypted_buf = self.cipher.encrypt(&nonce, buf.as_slice()).unwrap();
+            let encrypted_buf = self.cipher.encrypt(&nonce, buf.as_ref()).unwrap();
 
             return match geds_file.write(&encrypted_buf, 0, encrypted_buf.len()) {
                 Ok(()) => Ok(u32::try_from(encrypted_buf.len())?),
-                Err(e) => {
-                    Err(Errno::Fault.into())
-                }
+                Err(_) => Err(Errno::Fault.into()),
             };
         }
-        self.inner.fd_write(mem, fd, iovs).await
+        self.next.fd_write(mem, fd, iovs).await
     }
 
     async fn path_open(
@@ -245,7 +247,7 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
         fs_rights_inheriting: Rights,
         fdflags: Fdflags,
     ) -> Result<Fd, Error> {
-        let str_path = read_string(mem, path)?;
+        let str_path = memory::read_path(mem, path)?;
 
         if let Some(start) = str_path.find("geds://") {
             let str_path = &str_path[start + 7..]; // Extrae lo que hay después de "geds://"
@@ -272,7 +274,7 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
                 }
             };
         }
-        self.inner
+        self.next
             .path_open(
                 mem,
                 fd,
@@ -292,7 +294,7 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
         fd: Fd,
         path: GuestPtr<str>,
     ) -> Result<(), Error> {
-        let str_path = read_string(mem, path)?;
+        let str_path = memory::read_path(mem, path)?;
         if str_path.contains("geds://") {
             let path = str_path.replace("geds://", "");
             let bucket = path.split("/").next().unwrap();
@@ -306,32 +308,10 @@ impl DelegatingWasiCtx for PeridotGEDSCtx {
                 }
             };
         }
-        self.inner.path_unlink_file(mem, fd, path).await
+        self.next.path_unlink_file(mem, fd, path).await
     }
 }
 
-fn read_string<'a>(memory: &'a GuestMemory<'_>, ptr: GuestPtr<str>) -> Result<String, GuestError> {
-    Ok(memory.as_cow_str(ptr)?.into_owned())
-}
-
-fn first_non_empty_ciovec(
-    memory: &GuestMemory<'_>,
-    ciovs: CiovecArray,
-) -> Result<GuestPtr<[u8]>, GuestError> {
-    for iov in ciovs.iter() {
-        let iov = memory.read(iov?)?;
-        if iov.buf_len == 0 {
-            continue;
-        }
-        return Ok(iov.buf.as_array(iov.buf_len));
-    }
-    Ok(GuestPtr::new((0, 0)))
-}
-
-impl Deref for PeridotGEDSCtx {
-    type Target = PeridotContext;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
+peridot::export_peridot_plugin! {
+    "geds" => crate::factory,
 }

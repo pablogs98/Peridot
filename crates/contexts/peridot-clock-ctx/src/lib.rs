@@ -1,24 +1,27 @@
-use std::ops::Deref;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use async_trait::async_trait;
 use log::info;
-use wasmtime_wasi::p1::types::{Error, Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta, Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights, Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence, Errno};
-use wasmtime_wasi::p1::wasi_snapshot_preview1::WasiSnapshotPreview1;
-use wasmtime_wasi::p1::WasiP1Ctx;
-use wiggle::{GuestMemory, GuestPtr};
-use peridot::context::{DelegatingWasiCtx, PeridotContext};
+use wasmtime_wasi::p1::types::{Errno, Error, CiovecArray, Clockid, Fd, Filesize, IovecArray, Size, Timestamp};
+use wiggle::GuestMemory;
+use peridot::context::DelegatingWasiCtx;
+use peridot::plugin::{BoxedContextFuture, ContextConfig};
 
 
 pub struct PeridotClockCtx {
-    inner: PeridotContext,
+    next: Box<dyn DelegatingWasiCtx>,
     clock: Duration,
     logs: Vec<String>,
 }
 
+/// Registry entry point. Registered under the name `clock`.
+pub fn factory(next: Box<dyn DelegatingWasiCtx>, _config: ContextConfig<'_>) -> BoxedContextFuture<'_> {
+    Box::pin(async move { Ok(Box::new(PeridotClockCtx::new(next)) as Box<dyn DelegatingWasiCtx>) })
+}
+
 impl PeridotClockCtx {
-    pub fn new(inner: PeridotContext) -> Self {
-        Self { inner, clock: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap(), logs: Vec::new() }
+    pub fn new(next: Box<dyn DelegatingWasiCtx>) -> Self {
+        Self { next, clock: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap(), logs: Vec::new() }
     }
 
     pub fn drop_cache(&mut self) {
@@ -62,8 +65,8 @@ impl PeridotClockCtx {
 
 #[async_trait]
 impl DelegatingWasiCtx for PeridotClockCtx {
-    fn inner(&mut self) -> &mut WasiP1Ctx {
-        self.inner.inner()
+    fn next(&mut self) -> Option<&mut dyn DelegatingWasiCtx> {
+        Some(&mut *self.next)
     }
     
     fn clock_time_get(&mut self, _mem: &mut GuestMemory<'_>, id: Clockid, _precision: Timestamp) -> Result<Timestamp, Error> {
@@ -96,7 +99,7 @@ impl DelegatingWasiCtx for PeridotClockCtx {
     async fn fd_datasync(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
         self.drop_cache();
         let start_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
-        let res = self.inner.fd_datasync(mem, fd).await;
+        let res = self.next.fd_datasync(mem, fd).await;
         self.update_clock();
         let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
         self.add_log(format!("fd_datasync,{}", end_clock.as_nanos() - start_clock.as_nanos()));
@@ -106,7 +109,7 @@ impl DelegatingWasiCtx for PeridotClockCtx {
     async fn fd_pread(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: IovecArray, offset: Filesize) -> Result<Size, Error> {
         self.drop_cache();
         let start_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
-        let res = self.inner.fd_pread(mem, fd, iovs, offset).await;
+        let res = self.next.fd_pread(mem, fd, iovs, offset).await;
         self.update_clock();
         let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
         self.add_log(format!("fd_pread,{}", end_clock.as_nanos() - start_clock.as_nanos()));
@@ -116,7 +119,7 @@ impl DelegatingWasiCtx for PeridotClockCtx {
     async fn fd_pwrite(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: CiovecArray, offset: Filesize) -> Result<Size, Error> {
         self.drop_cache();
         let start_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
-        let res= self.inner.fd_pwrite(mem, fd, iovs, offset).await;
+        let res= self.next.fd_pwrite(mem, fd, iovs, offset).await;
         self.update_clock();
         let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
         self.add_log(format!("fd_pwrite,{}", end_clock.as_nanos() - start_clock.as_nanos()));
@@ -126,7 +129,7 @@ impl DelegatingWasiCtx for PeridotClockCtx {
     async fn fd_read(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: IovecArray) -> Result<Size, Error> {
         self.drop_cache();
         let start_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
-        let res = self.inner.fd_read(mem, fd, iovs).await;
+        let res = self.next.fd_read(mem, fd, iovs).await;
         self.update_clock();
         let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
         self.add_log(format!("fd_read,{}", end_clock.as_nanos() - start_clock.as_nanos()));
@@ -136,7 +139,7 @@ impl DelegatingWasiCtx for PeridotClockCtx {
     async fn fd_write(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, iovs: CiovecArray) -> Result<Size, Error> {
         self.drop_cache();
         let start_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
-        let res = self.inner.fd_write(mem, fd, iovs).await;
+        let res = self.next.fd_write(mem, fd, iovs).await;
         self.update_clock();
         let end_clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
         unsafe {
@@ -145,13 +148,5 @@ impl DelegatingWasiCtx for PeridotClockCtx {
             }
         }
         res
-    }
-}
-
-impl Deref for PeridotClockCtx {
-    type Target = PeridotContext;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
     }
 }
