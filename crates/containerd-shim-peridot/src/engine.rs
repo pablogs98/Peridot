@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use anyhow::{anyhow, bail, Context, Result};
 use containerd_shim_wasm::sandbox::context::{Entrypoint, RuntimeContext, Source, WasmBinaryType, WasmLayer};
 use containerd_shim_wasm::sandbox::Sandbox;
@@ -215,7 +214,14 @@ impl PeridotSandbox {
         debug!("init linker");
 
         // Assemble the context chain named by the config, on top of plain WASI.
-        let registry = build_registry();
+        let mut registry = build_registry();
+        // SAFETY: the operator named these libraries in their own configuration file, and
+        // `load_library` refuses anything not built against this exact runtime ABI.
+        //
+        // The shim runs inside the container, so these paths are resolved against the image's
+        // filesystem rather than the host's: a plugin has to be shipped in the image.
+        unsafe { registry.load_configured(&config) }?;
+        let registry = registry;
         // The shim preopens the whole root; contexts that open host files themselves need
         // this to resolve guest paths, since WasiP1Ctx does not expose the mapping.
         let preopens = vec![Preopen {

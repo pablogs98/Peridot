@@ -408,12 +408,19 @@ unchanged.
 | Preopened directory | The module's own directory, as `.` | The host root, as `/` |
 | Module source | A path on disk | An OCI image layer |
 | Compilation | On every run | Precompiled and cached by containerd |
-| `plugins:` | Loaded | Ignored; only built-in contexts are available |
+| `plugins:` | Paths on the host | Paths inside the container image |
 | Metrics thread | Started only when `overseer_address` is set | Always attempted, failure logged as a warning |
 
-Two consequences worth noting. Because the shim ignores `plugins:`, the `geds` context cannot be
-used under it. And the shim preopens the host root rather than a single directory, so a guest sees
-far more of the filesystem than it does under the CLI.
+Plugins work under the shim, but the shim runs inside the container, so a `plugins:` path is
+resolved against the image's filesystem and the library has to be shipped in the image. Build it
+against the shim rather than the CLI, since that is the binary it will be loaded into:
+
+```bash
+cargo build --release -p containerd-shim-peridot -p peridot-geds-ctx
+```
+
+Note also that the shim preopens the host root rather than a single directory, so a guest sees far
+more of the filesystem than it does under the CLI.
 
 Components are not supported, only modules.
 

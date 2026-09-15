@@ -87,12 +87,9 @@ async fn run_module(
 
     // Load any plugin libraries first, so the contexts they provide can be named below.
     let mut registry = build_registry();
-    for path in &config.plugins {
-        // SAFETY: the operator named this library in their own configuration file, and
-        // `load_library` refuses anything not built against this exact runtime ABI.
-        let added = unsafe { registry.load_library(path) }?;
-        log::info!("loaded plugin {} providing {:?}", path.display(), added);
-    }
+    // SAFETY: the operator named these libraries in their own configuration file, and
+    // `load_library` refuses anything not built against this exact runtime ABI.
+    unsafe { registry.load_configured(&config) }?;
     let registry = registry;
     let mut chain = registry
         .build_chain(PeridotContext::boxed(wasi), &config, &preopens)

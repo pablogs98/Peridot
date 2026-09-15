@@ -304,6 +304,23 @@ impl PluginRegistry {
         Ok(added)
     }
 
+    /// Loads every library named in `config.plugins`, logging what each one provides.
+    ///
+    /// Every runtime that builds a chain should call this first, so that a `plugins:` list means
+    /// the same thing wherever a configuration file is used.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`load_library`](PluginRegistry::load_library): each path must be a
+    /// genuine Peridot plugin built from this workspace and toolchain.
+    pub unsafe fn load_configured(&mut self, config: &PeridotConfig) -> Result<()> {
+        for path in &config.plugins {
+            let added = self.load_library(path)?;
+            log::info!("loaded plugin {} providing {:?}", path.display(), added);
+        }
+        Ok(())
+    }
+
     /// Names available to `config.contexts`, sorted for stable error messages.
     pub fn registered(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self.factories.keys().map(String::as_str).collect();
