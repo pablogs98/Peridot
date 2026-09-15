@@ -3,7 +3,7 @@
 ![Rust workflow](https://github.com/pablogs98/peridot/actions/workflows/rust.yml/badge.svg)
 
 Peridot runs a WebAssembly module under WASI preview 1 and lets you replace the implementation of
-individual hostcalls with a **context** — a link in a chain that sits between the guest and the
+individual hostcalls with a **context**, a link in a chain that sits between the guest and the
 real WASI implementation. A context can count bytes, rate-limit I/O, redirect `path_open` to
 object storage, batch small writes, or anything else expressible at the hostcall boundary, without
 the guest module being recompiled or even aware.
@@ -22,16 +22,19 @@ feature flags.
 | A C toolchain and `cmake` | `aws-lc-sys`, pulled in by the AWS SDK that the `s3` and `batch` contexts use. |
 | [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) *(optional)* | Only to build the C guest modules under `c-wasm/`. Any `wasm32-wasip1` binary works. |
 
-On Debian/Ubuntu:
+Install them with:
 
 ```bash
 sudo apt install protobuf-compiler build-essential cmake pkg-config
 ```
 
-Two workspace members cannot be built everywhere and are therefore **not** part of the default
-build: `containerd-shim-peridot`, which depends on `procfs` through libcgroups and is Linux-only,
-and `peridot-geds-ctx`, which does not compile until you have IBM GEDS installed (see
-[GEDS](#geds)). Both are still full workspace members, so build either explicitly with `-p`.
+Peridot is developed and tested on Ubuntu.
+
+Two workspace members are **not** part of the default build: `peridot-geds-ctx`, which does not
+compile until you have IBM GEDS installed (see [GEDS](#geds)), and `containerd-shim-peridot`,
+which you only need for the deployment described in
+[Deploying with containerd](#deploying-with-containerd). Both are still full workspace members,
+so build either explicitly with `-p`.
 
 ---
 
@@ -47,14 +50,14 @@ selected until a configuration file names it.
 To build one of the two non-default members, name it:
 
 ```bash
-cargo build --release -p containerd-shim-peridot   # Linux only
+cargo build --release -p containerd-shim-peridot
 ```
 
 ---
 
 ## Quick start: running a module with the `counter` context
 
-`counter` is the reference context — it intercepts `fd_write` and `fd_pwrite`, adds up the bytes
+`counter` is the reference context. It intercepts `fd_write` and `fd_pwrite`, adds up the bytes
 the guest writes, and publishes the running total as a `written_bytes` metric. It needs no
 external services, which makes it a good first run.
 
@@ -77,7 +80,7 @@ cmake -S c-wasm -B c-wasm/build \
 cmake --build c-wasm/build
 ```
 
-A Rust guest works just as well — `rustup target add wasm32-wasip1`, then
+A Rust guest works just as well. Run `rustup target add wasm32-wasip1`, then
 `cargo build --target wasm32-wasip1`.
 
 ### 2. Write a configuration file
@@ -130,7 +133,7 @@ peridot <MODULE_PATH> <CONFIG_PATH> [OPTIONS]
 | `<CONFIG_PATH>` | ✔️ | The YAML configuration file |
 | `--log-level, -l` | ✖️ | Log verbosity, default `info`. Ignored if `RUST_LOG` is set. |
 
-Contexts are **not** selectable on the command line — that is what the configuration file is for.
+Contexts are configured in the YAML file.
 
 ---
 
@@ -183,13 +186,13 @@ cares about; the other forty-odd forward automatically.
 
 | Name | Replaces | Settings |
 |---|---|---|
-| `counter` | `fd_write`, `fd_pwrite` — counts bytes written | — |
-| `token` | `fd_read`/`fd_write`/`fd_pread`/`fd_pwrite` — rate limiting | `max_bandwidth` (defaults to `io.max_bandwidth`) |
-| `clock` | `clock_time_get` and the I/O calls — latency tracing | — |
+| `counter` | `fd_write`, `fd_pwrite`: counts bytes written | None |
+| `token` | `fd_read`/`fd_write`/`fd_pread`/`fd_pwrite`: rate limiting | `max_bandwidth` (defaults to `io.max_bandwidth`) |
+| `clock` | `clock_time_get` and the I/O calls: latency tracing | None |
 | `s3` | `path_open`/`fd_write`/`fd_close` on `s3://` paths | credentials from the environment |
 | `geds` | the same, on `geds://` paths | see [GEDS](#geds) below |
-| `batch` | `fd_write` — accumulates files, uploads them as one parquet object | `batch_size`, `bucket` (required) |
-| `syscall-batching` | `path_open` and the write path — coalesces small writes | `num_writes` (default `1`, which disables batching) |
+| `batch` | `fd_write`: accumulates files, uploads them as one parquet object | `batch_size`, `bucket` (required) |
+| `syscall-batching` | `path_open` and the write path: coalesces small writes | `num_writes` (default `1`, which disables batching) |
 
 All of these except `geds` are built into the binary. `geds` ships as a plugin, because it cannot
 be built without a native IBM GEDS installation.
@@ -214,7 +217,7 @@ neither builds nor links it.
 ### 1. Install GEDS
 
 Follow the upstream build instructions at <https://github.com/IBM/GEDS>. Install it to a prefix
-whose Rust bindings land where the manifest expects them — with the default prefix `/usr/local`,
+whose Rust bindings land where the manifest expects them. With the default prefix `/usr/local`,
 that is `/usr/local/rust`.
 
 ### 2. Enable the dependency
@@ -276,7 +279,7 @@ cpu:
   utilization: 0.85
 ```
 
-The guest then addresses objects as `geds://<bucket>/<key>` — an ordinary `open`, `write`, `read`
+The guest then addresses objects as `geds://<bucket>/<key>`. An ordinary `open`, `write`, `read`
 or `unlink` on such a path is serviced by GEDS instead of the filesystem. Paths that do not start
 with `geds://` fall through to the next context untouched, so a module can mix both freely.
 
@@ -307,7 +310,7 @@ peridot::export_peridot_plugin! {
 ```
 
 `crates/plugins/peridot-trace-plugin` is a complete working example. It is deliberately not a
-dependency of the `peridot` binary — that is the point.
+dependency of the `peridot` binary, which is the point.
 
 > **Build the plugin and the runtime in the same Cargo invocation:**
 >
@@ -323,14 +326,103 @@ dependency of the `peridot` binary — that is the point.
 > Peridot checks two things before calling into a library and refuses to load on either mismatch:
 > a version fingerprint (Peridot version, rustc version, target triple), and a type probe derived
 > from `TypeId`, which additionally catches differing dependency versions, features, or a
-> separately compiled `peridot` — cases the version string cannot see.
+> separately compiled `peridot`, none of which the version string can see.
+
+---
+
+## Deploying with containerd
+
+Peridot ships a containerd shim, so a Wasm workload can run as an ordinary container under `ctr`,
+`nerdctl` or Kubernetes and still get its context chain.
+
+The shim is built on [runwasi](https://github.com/containerd/runwasi), the containerd project's
+framework for Wasm shims, and follows its Wasmtime shim closely. It currently tracks a fork,
+<https://github.com/miqalvarez/runwasi>, pinned in `crates/containerd-shim-peridot/Cargo.toml`.
+runwasi handles the containerd plumbing: sandbox lifecycle, image pulling, layer handling and
+compilation caching. Peridot supplies the `Sandbox` implementation that assembles the context
+chain around the guest.
+
+`crates/containerd-shim-peridot/README.md` has the full walkthrough. What follows is the short
+version.
+
+### 1. Build and install the shim
+
+```bash
+cargo build --release -p containerd-shim-peridot
+sudo cp target/release/containerd-shim-peridot-v1 /usr/local/bin/
+```
+
+containerd locates a shim by its binary name, so the file must keep the name
+`containerd-shim-peridot-v1` and sit on containerd's `PATH`. That name maps to the runtime handler
+`io.containerd.peridot.v1`.
+
+### 2. Build the image
+
+The shim runs OCI images only; a plain file path is not supported. Images follow the
+[Wasm OCI artifact layout](https://tag-runtime.cncf.io/wgs/wasm/deliverables/wasm-oci-artifact/)
+and carry two layers, told apart by media type:
+
+| Layer | Media type |
+|---|---|
+| The Wasm module | `application/vnd.bytecodealliance.wasm.component.layer.v0+wasm` |
+| The Peridot configuration | `application/vnd.peridot.image.layer.v1+json` |
+
+The configuration layer holds the same YAML documented under [Configuration](#configuration),
+despite the `+json` suffix on its media type. The shim writes it to `/peridot_conf.yaml` inside
+the sandbox and reads it back from there.
+
+Build the artifact with `oci-tar-builder`:
+
+```bash
+cargo install oci-tar-builder
+
+oci-tar-builder --name wasi-helloworld \
+                --repo localhost:5000 \
+                --tag latest --module wasi-helloworld.wasm \
+                --layer application/vnd.peridot.image.layer.v1+json=peridot-config.yaml \
+                -o wasi-helloworld-oci.tar
+```
+
+Then import it into a registry. A local one is enough:
+
+```bash
+docker run -d -p 5000:5000 --name registry registry:2.7
+regctl image import localhost:5000/wasi-helloworld:latest wasi-helloworld-oci.tar
+```
+
+### 3. Run it
+
+```bash
+sudo ctr run --rm --net-host --runtime=io.containerd.peridot.v1 \
+    localhost:5000/wasi-helloworld:latest wasi-helloworld /wasi-helloworld.wasm
+```
+
+The final argument is the path of the module inside the image, so it follows the name given to
+`--module`. The chain comes from the configuration layer, so the same `contexts:` list works
+unchanged.
+
+### Differences from the CLI
+
+| | `peridot` CLI | containerd shim |
+|---|---|---|
+| Preopened directory | The module's own directory, as `.` | The host root, as `/` |
+| Module source | A path on disk | An OCI image layer |
+| Compilation | On every run | Precompiled and cached by containerd |
+| `plugins:` | Loaded | Ignored; only built-in contexts are available |
+| Metrics thread | Started only when `overseer_address` is set | Always attempted, failure logged as a warning |
+
+Two consequences worth noting. Because the shim ignores `plugins:`, the `geds` context cannot be
+used under it. And the shim preopens the host root rather than a single directory, so a guest sees
+far more of the filesystem than it does under the CLI.
+
+Components are not supported, only modules.
 
 ---
 
 ## Writing a context
 
 Implement `DelegatingWasiCtx` (from the `peridot` crate), overriding only the hostcalls you care
-about — the default bodies forward everything else to the next context in the chain. Then expose a
+about. The default bodies forward everything else to the next context in the chain. Then expose a
 `factory` function. To build it into the binary, register it in `build_registry` in `src/main.rs`
 (and in `crates/containerd-shim-peridot/src/engine.rs` for the shim); to ship it separately, use
 `export_peridot_plugin!` as above. See `crates/contexts/peridot-counter-ctx` for the reference
@@ -342,8 +434,8 @@ guest memory directly and only copies when the guest uses **shared** memory, whe
 hand out a borrow safely.
 
 Note that borrowing only pays off if the context consumes the bytes before the hostcall returns. A
-context that defers work — a spawned upload, a buffer flushed later — must call `into_owned()`, and
-that copy is unavoidable.
+context that defers work, such as a spawned upload or a buffer flushed later, must call
+`into_owned()`, and that copy is unavoidable.
 
 A context with in-flight background work should override `shutdown`, which runs after the guest's
 `_start` returns, outermost link first. Flush there, then forward to the next link.
