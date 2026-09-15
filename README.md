@@ -378,16 +378,16 @@ cargo install oci-tar-builder
 
 oci-tar-builder --name wasi-helloworld \
                 --repo localhost:5000 \
-                --tag latest --module hello.wasm \
+                --tag latest --module wasi-helloworld.wasm \
                 --layer application/vnd.peridot.image.layer.v1+json=peridot-config.yaml \
-                -o hello-oci.tar
+                -o wasi-helloworld-oci.tar
 ```
 
 Then import it into a registry. A local one is enough:
 
 ```bash
 docker run -d -p 5000:5000 --name registry registry:2.7
-regctl image import localhost:5000/wasi-helloworld:latest hello-oci.tar
+regctl image import localhost:5000/wasi-helloworld:latest wasi-helloworld-oci.tar
 ```
 
 ### 3. Run it
@@ -397,8 +397,9 @@ sudo ctr run --rm --net-host --runtime=io.containerd.peridot.v1 \
     localhost:5000/wasi-helloworld:latest wasi-helloworld /wasi-helloworld.wasm
 ```
 
-The final argument is the path of the module inside the image, as `oci-tar-builder` placed it. The
-chain comes from the configuration layer, so the same `contexts:` list works unchanged.
+The final argument is the path of the module inside the image, so it follows the name given to
+`--module`. The chain comes from the configuration layer, so the same `contexts:` list works
+unchanged.
 
 ### Differences from the CLI
 
