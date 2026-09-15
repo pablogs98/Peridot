@@ -22,16 +22,19 @@ feature flags.
 | A C toolchain and `cmake` | `aws-lc-sys`, pulled in by the AWS SDK that the `s3` and `batch` contexts use. |
 | [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) *(optional)* | Only to build the C guest modules under `c-wasm/`. Any `wasm32-wasip1` binary works. |
 
-On Debian/Ubuntu:
+Install them with:
 
 ```bash
 sudo apt install protobuf-compiler build-essential cmake pkg-config
 ```
 
-Two workspace members cannot be built everywhere and are therefore **not** part of the default
-build: `containerd-shim-peridot`, which depends on `procfs` through libcgroups and is Linux-only,
-and `peridot-geds-ctx`, which does not compile until you have IBM GEDS installed (see
-[GEDS](#geds)). Both are still full workspace members, so build either explicitly with `-p`.
+Peridot is developed and tested on Ubuntu.
+
+Two workspace members are **not** part of the default build: `peridot-geds-ctx`, which does not
+compile until you have IBM GEDS installed (see [GEDS](#geds)), and `containerd-shim-peridot`,
+which you only need for the deployment described in
+[Deploying with containerd](#deploying-with-containerd). Both are still full workspace members,
+so build either explicitly with `-p`.
 
 ---
 
@@ -47,7 +50,7 @@ selected until a configuration file names it.
 To build one of the two non-default members, name it:
 
 ```bash
-cargo build --release -p containerd-shim-peridot   # Linux only
+cargo build --release -p containerd-shim-peridot
 ```
 
 ---
@@ -324,6 +327,72 @@ dependency of the `peridot` binary, which is the point.
 > a version fingerprint (Peridot version, rustc version, target triple), and a type probe derived
 > from `TypeId`, which additionally catches differing dependency versions, features, or a
 > separately compiled `peridot`, none of which the version string can see.
+
+---
+
+## Deploying with containerd
+
+Peridot ships a containerd shim, so a Wasm workload can run as an ordinary container under `ctr`,
+`nerdctl` or Kubernetes and still get its context chain.
+
+The shim is built on [runwasi](https://github.com/containerd/runwasi), the containerd project's
+framework for Wasm shims. It currently tracks a fork, <https://github.com/miqalvarez/runwasi>,
+pinned in `crates/containerd-shim-peridot/Cargo.toml`. runwasi handles the containerd plumbing:
+sandbox lifecycle, image pulling, layer handling and compilation caching. Peridot supplies the
+`Sandbox` implementation that assembles the context chain around the guest.
+
+### 1. Build and install the shim
+
+```bash
+cargo build --release -p containerd-shim-peridot
+sudo cp target/release/containerd-shim-peridot-v1 /usr/local/bin/
+```
+
+containerd locates a shim by its binary name, so the file must keep the name
+`containerd-shim-peridot-v1` and sit on containerd's `PATH`. That name maps to the runtime handler
+`io.containerd.peridot.v1`.
+
+### 2. Build the image
+
+The shim runs OCI images only; a plain file path is not supported. The image needs two layers,
+told apart by media type:
+
+| Layer | Media type |
+|---|---|
+| The Wasm module | `application/vnd.bytecodealliance.wasm.component.layer.v0+wasm` |
+| The Peridot configuration | `application/vnd.peridot.image.layer.v1+json` |
+
+The configuration layer holds the same YAML documented under [Configuration](#configuration),
+despite the `+json` suffix on its media type. The shim writes it to `/peridot_conf.yaml` inside
+the sandbox and reads it back from there.
+
+runwasi's `oci-tar-builder` is the usual way to produce an artifact with custom layer media types.
+Load the result with `ctr image import`.
+
+### 3. Run it
+
+```bash
+sudo ctr run --rm --runtime io.containerd.peridot.v1 \
+    docker.io/library/my-wasm-app:latest my-app
+```
+
+The chain comes from the configuration layer, so the same `contexts:` list works unchanged.
+
+### Differences from the CLI
+
+| | `peridot` CLI | containerd shim |
+|---|---|---|
+| Preopened directory | The module's own directory, as `.` | The host root, as `/` |
+| Module source | A path on disk | An OCI image layer |
+| Compilation | On every run | Precompiled and cached by containerd |
+| `plugins:` | Loaded | Ignored; only built-in contexts are available |
+| Metrics thread | Started only when `overseer_address` is set | Always attempted, failure logged as a warning |
+
+Two consequences worth noting. Because the shim ignores `plugins:`, the `geds` context cannot be
+used under it. And the shim preopens the host root rather than a single directory, so a guest sees
+far more of the filesystem than it does under the CLI.
+
+Wasm components are not supported, only modules.
 
 ---
 
