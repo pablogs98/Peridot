@@ -336,10 +336,14 @@ Peridot ships a containerd shim, so a Wasm workload can run as an ordinary conta
 `nerdctl` or Kubernetes and still get its context chain.
 
 The shim is built on [runwasi](https://github.com/containerd/runwasi), the containerd project's
-framework for Wasm shims. It currently tracks a fork, <https://github.com/miqalvarez/runwasi>,
-pinned in `crates/containerd-shim-peridot/Cargo.toml`. runwasi handles the containerd plumbing:
-sandbox lifecycle, image pulling, layer handling and compilation caching. Peridot supplies the
-`Sandbox` implementation that assembles the context chain around the guest.
+framework for Wasm shims, and follows its Wasmtime shim closely. It currently tracks a fork,
+<https://github.com/miqalvarez/runwasi>, pinned in `crates/containerd-shim-peridot/Cargo.toml`.
+runwasi handles the containerd plumbing: sandbox lifecycle, image pulling, layer handling and
+compilation caching. Peridot supplies the `Sandbox` implementation that assembles the context
+chain around the guest.
+
+`crates/containerd-shim-peridot/README.md` has the full walkthrough. What follows is the short
+version.
 
 ### 1. Build and install the shim
 
@@ -354,8 +358,9 @@ containerd locates a shim by its binary name, so the file must keep the name
 
 ### 2. Build the image
 
-The shim runs OCI images only; a plain file path is not supported. The image needs two layers,
-told apart by media type:
+The shim runs OCI images only; a plain file path is not supported. Images follow the
+[Wasm OCI artifact layout](https://tag-runtime.cncf.io/wgs/wasm/deliverables/wasm-oci-artifact/)
+and carry two layers, told apart by media type:
 
 | Layer | Media type |
 |---|---|
@@ -366,17 +371,34 @@ The configuration layer holds the same YAML documented under [Configuration](#co
 despite the `+json` suffix on its media type. The shim writes it to `/peridot_conf.yaml` inside
 the sandbox and reads it back from there.
 
-runwasi's `oci-tar-builder` is the usual way to produce an artifact with custom layer media types.
-Load the result with `ctr image import`.
+Build the artifact with `oci-tar-builder`:
+
+```bash
+cargo install oci-tar-builder
+
+oci-tar-builder --name wasi-helloworld \
+                --repo localhost:5000 \
+                --tag latest --module hello.wasm \
+                --layer application/vnd.peridot.image.layer.v1+json=peridot-config.yaml \
+                -o hello-oci.tar
+```
+
+Then import it into a registry. A local one is enough:
+
+```bash
+docker run -d -p 5000:5000 --name registry registry:2.7
+regctl image import localhost:5000/wasi-helloworld:latest hello-oci.tar
+```
 
 ### 3. Run it
 
 ```bash
-sudo ctr run --rm --runtime io.containerd.peridot.v1 \
-    docker.io/library/my-wasm-app:latest my-app
+sudo ctr run --rm --net-host --runtime=io.containerd.peridot.v1 \
+    localhost:5000/wasi-helloworld:latest wasi-helloworld /wasi-helloworld.wasm
 ```
 
-The chain comes from the configuration layer, so the same `contexts:` list works unchanged.
+The final argument is the path of the module inside the image, as `oci-tar-builder` placed it. The
+chain comes from the configuration layer, so the same `contexts:` list works unchanged.
 
 ### Differences from the CLI
 
@@ -392,7 +414,7 @@ Two consequences worth noting. Because the shim ignores `plugins:`, the `geds` c
 used under it. And the shim preopens the host root rather than a single directory, so a guest sees
 far more of the filesystem than it does under the CLI.
 
-Wasm components are not supported, only modules.
+Components are not supported, only modules.
 
 ---
 
