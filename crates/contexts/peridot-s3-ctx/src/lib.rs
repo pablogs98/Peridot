@@ -9,9 +9,10 @@ use aws_sdk_s3::primitives::ByteStream;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use wasmtime_wasi::p1::types::{Error, CiovecArray, Fd, Fdflags, Lookupflags, Oflags, Rights, Size};
-use wasmtime_wasi::p1::{WasiP1Ctx};
-use wiggle::{GuestError, GuestMemory, GuestPtr};
-use peridot::context::{DelegatingWasiCtx, PeridotContext};
+use peridot::memory;
+use wiggle::{GuestMemory, GuestPtr};
+use peridot::context::DelegatingWasiCtx;
+use peridot::plugin::{BoxedContextFuture, ContextConfig};
 
 #[derive(Default)]
 struct S3Descriptors {
@@ -81,19 +82,23 @@ impl S3Descriptors {
 }
 
 pub struct PeridotS3Ctx {
-    base: PeridotContext,
+    next: Box<dyn DelegatingWasiCtx>,
     s3: aws_sdk_s3::Client,
     s3_descriptors: S3Descriptors,
     futures: Vec<JoinHandle<(Result<PutObjectOutput, SdkError<PutObjectError>>, Duration, Instant)>>,
 }
 
+/// Registry entry point. Registered under the name `s3`.
+pub fn factory(next: Box<dyn DelegatingWasiCtx>, _config: ContextConfig<'_>) -> BoxedContextFuture<'_> {
+    Box::pin(async move { Ok(Box::new(PeridotS3Ctx::new(next).await) as Box<dyn DelegatingWasiCtx>) })
+}
+
 impl PeridotS3Ctx {
-    pub async fn new(base: PeridotContext) -> Self {
-        std::env::set_var("WASMTIME_LOG", "wasmtime_wasi=trace");
+    pub async fn new(next: Box<dyn DelegatingWasiCtx>) -> Self {
         let config = aws_config::load_from_env().await;
         let client = aws_sdk_s3::Client::new(&config);
         Self {
-            base,
+            next,
             s3: client,
             s3_descriptors: S3Descriptors::new(),
             futures: Vec::new(),
@@ -119,8 +124,14 @@ impl PeridotS3Ctx {
 
 #[async_trait]
 impl DelegatingWasiCtx for PeridotS3Ctx {
-    fn inner(&mut self) -> &mut WasiP1Ctx {
-        self.base.inner()
+    fn next(&mut self) -> Option<&mut dyn DelegatingWasiCtx> {
+        Some(&mut *self.next)
+    }
+
+    /// Uploads are spawned, not awaited, so they have to be joined before the process exits.
+    async fn shutdown(&mut self) {
+        self.drain_uploads().await;
+        self.next.shutdown().await;
     }
 
     async fn fd_close(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
@@ -128,7 +139,7 @@ impl DelegatingWasiCtx for PeridotS3Ctx {
             self.s3_descriptors.remove(fd);
             return Ok(());
         }
-        self.base.fd_close(mem, fd).await
+        self.next.fd_close(mem, fd).await
     }
 
     async fn fd_write(
@@ -137,50 +148,30 @@ impl DelegatingWasiCtx for PeridotS3Ctx {
         fd: Fd,
         iovs: CiovecArray,
     ) -> Result<Size, Error> {
-        println!("fd_write called");
         if self.s3_descriptors.contains_key(&u32::from(fd)) {
             let s3_file = self.s3_descriptors.get(&u32::from(fd)).unwrap();
-            let buf = first_non_empty_ciovec(mem, iovs)?;
-            let buf = mem.to_vec(buf)?;
+            // The upload is spawned, so the bytes outlive this call and must be owned.
+            let buf = memory::payload(mem, iovs)?.into_owned();
             let len = buf.len();
-            let body = aws_sdk_s3::primitives::ByteStream::from(buf);
+            let body = ByteStream::from(buf);
             let bucket = s3_file.split("//").nth(1).unwrap().split("/").next().unwrap();
             let key = s3_file.split("/").skip(3).collect::<Vec<&str>>().join("/");
             self.spawn_s3_upload(bucket.to_string(), key.to_string(), body);
             return Ok(u32::try_from(len)?);
         }
-        self.base.fd_write(mem, fd, iovs).await
+        self.next.fd_write(mem, fd, iovs).await
     }
 
     async fn path_open(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, dirflags: Lookupflags, path: GuestPtr<str>, oflags: Oflags, fs_rights_base: Rights, fs_rights_inheriting: Rights, fdflags: Fdflags) -> Result<Fd, Error> {
-        println!("path_open called");
-        let str_path = read_string(mem, path)?;
+        let str_path = memory::read_path(mem, path)?;
         if let Some(start) = str_path.find("s3://") {
             let str_path = &str_path[start..];
             let fd = self.s3_descriptors.push(str_path.to_string()).unwrap();
             let fd = fd.into();
             return Ok(fd);
         }
-        self.base.path_open(mem, fd, dirflags, path, oflags, fs_rights_base, fs_rights_inheriting, fdflags).await
+        self.next.path_open(mem, fd, dirflags, path, oflags, fs_rights_base, fs_rights_inheriting, fdflags).await
     }
-}
-
-fn read_string(memory: &GuestMemory, ptr: GuestPtr<str>) -> Result<String, GuestError> {
-    Ok(memory.as_cow_str(ptr)?.into_owned())
-}
-
-fn first_non_empty_ciovec(
-    memory: &GuestMemory<'_>,
-    ciovs: CiovecArray,
-) -> Result<GuestPtr<[u8]>, GuestError> {
-    for iov in ciovs.iter() {
-        let iov = memory.read(iov?)?;
-        if iov.buf_len == 0 {
-            continue;
-        }
-        return Ok(iov.buf.as_array(iov.buf_len));
-    }
-    Ok(GuestPtr::new((0, 0)))
 }
 
 impl PeridotS3Ctx {
@@ -239,14 +230,5 @@ impl PeridotS3Ctx {
                 }
             }
         }
-    }
-}
-
-
-impl Deref for PeridotS3Ctx {
-    type Target = WasiP1Ctx;
-
-    fn deref(&self) -> &Self::Target {
-        &self.base.inner
     }
 }

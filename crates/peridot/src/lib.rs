@@ -13,3 +13,9 @@ pub mod context;
 /// Metrics module for Peridot. Handles collection and reporting of system and application metrics.
 pub mod metrics;
 
+/// Plugin registry. Maps context names from the configuration file to the code that builds them.
+pub mod plugin;
+
+/// Helpers for reading guest linear memory, including the shared-memory fallback.
+pub mod memory;
+

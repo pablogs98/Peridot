@@ -1,131 +1,215 @@
-use log::{error, info};
-use std::collections::{BTreeMap, HashMap};
-use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, Mutex};
-use arrow::datatypes::{DataType, Field, Schema};
-use aws_sdk_s3::primitives::ByteStream;
-use tokio::runtime::Runtime;
-use wasmtime_wasi::p1::types::{Error, Advice, CiovecArray, Clockid, Dircookie, Event, Exitcode, Fd, Fdflags, Fdstat, Filedelta, Filesize, Filestat, Fstflags, IovecArray, Lookupflags, Oflags, Prestat, Riflags, Rights, Roflags, Sdflags, Siflags, Signal, Size, Subscription, Timestamp, Whence};
-use wasmtime_wasi::p1::wasi_snapshot_preview1::WasiSnapshotPreview1;
-use wasmtime_wasi::p1::WasiP1Ctx;
-use wiggle::{tracing, GuestError, GuestMemory, GuestPtr};
-use peridot::context::{DelegatingWasiCtx, PeridotContext};
+//! Accumulates the files a guest writes and uploads them to S3 in groups, as one parquet object
+//! per batch.
+//!
+//! Writes to stdio pass straight through. Everything else is buffered: `fd_write` reports success
+//! to the guest as soon as the bytes are queued, and the upload happens once `batch_size` files
+//! have accumulated. Whatever is still queued when the guest exits is flushed by [`shutdown`].
+//!
+//! [`shutdown`]: DelegatingWasiCtx::shutdown
 
-use arrow::array::{BinaryArray, ArrayRef};
+use anyhow::{Context as _, Result};
+use arrow::array::{ArrayRef, BinaryArray};
+use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
+use async_trait::async_trait;
+use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::operation::put_object::{PutObjectError, PutObjectOutput};
+use aws_sdk_s3::primitives::ByteStream;
+use log::{debug, error, info, warn};
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
+use peridot::context::DelegatingWasiCtx;
+use peridot::memory;
+use peridot::plugin::{BoxedContextFuture, ContextConfig};
+use serde::Deserialize;
 use std::io::Cursor;
-use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::task::JoinHandle;
+use uuid::Uuid;
+use wasmtime_wasi::p1::types::{CiovecArray, Error, Fd, Size};
+use wiggle::GuestMemory;
+
+/// Settings for the `batch` context.
+#[derive(Debug, Deserialize)]
+pub struct BatchSettings {
+    /// How many guest files to accumulate before uploading them as one parquet object.
+    pub batch_size: usize,
+    /// Destination S3 bucket.
+    pub bucket: String,
+}
+
+impl Default for BatchSettings {
+    fn default() -> Self {
+        Self {
+            batch_size: 100,
+            bucket: String::new(),
+        }
+    }
+}
+
+/// Registry entry point. Registered under the name `batch`.
+pub fn factory(next: Box<dyn DelegatingWasiCtx>, config: ContextConfig<'_>) -> BoxedContextFuture<'_> {
+    Box::pin(async move {
+        let settings: BatchSettings = config.parse()?;
+        if settings.bucket.is_empty() {
+            anyhow::bail!("the `batch` context requires a non-empty `bucket` in its config block");
+        }
+        Ok(
+            Box::new(PeridotBatchCtx::new(next, settings.batch_size, &settings.bucket).await)
+                as Box<dyn DelegatingWasiCtx>,
+        )
+    })
+}
 
 pub struct PeridotBatchCtx {
-    inner: PeridotContext,
+    next: Box<dyn DelegatingWasiCtx>,
     batch_size: usize,
     bucket: String,
     s3: aws_sdk_s3::Client,
-    tokio_runtime: Runtime,
+    /// Files written by the guest but not yet part of an upload.
     pending_batches: Vec<Vec<u8>>,
-    futures: Vec<tokio::task::JoinHandle<Result<aws_sdk_s3::operation::put_object::PutObjectOutput,  aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::put_object::PutObjectError>>>>
+    /// Uploads in flight. Spawned rather than awaited, so they have to be joined before the
+    /// process exits — see [`PeridotBatchCtx::drain_uploads`].
+    uploads: Vec<JoinHandle<Result<PutObjectOutput, SdkError<PutObjectError>>>>,
 }
+
 impl PeridotBatchCtx {
-    pub fn new(inner: PeridotContext, batch_size: usize, bucket: &str) -> Self {
-        std::env::set_var("WASMTIME_LOG", "wasmtime_wasi=trace");
-        let config = Runtime::new()
-            .unwrap()
-            .block_on(aws_config::load_from_env());
+    pub async fn new(next: Box<dyn DelegatingWasiCtx>, batch_size: usize, bucket: &str) -> Self {
+        let config = aws_config::load_from_env().await;
         let client = aws_sdk_s3::Client::new(&config);
         Self {
-            inner,
-            s3: client,
+            next,
             batch_size,
             bucket: bucket.to_string(),
+            s3: client,
             pending_batches: Vec::new(),
-            tokio_runtime: Runtime::new().unwrap(),
-            futures: Vec::new(),
+            uploads: Vec::new(),
         }
     }
 
-    pub fn flush_pending_uploads(&mut self) {
-        while let Some(fut) = self.futures.pop() {
-            match self.tokio_runtime.block_on(fut) {
-                Ok(_) => tracing::info!("Upload successful"),
-                Err(e) => tracing::error!("Upload failed: {:?}", e),
+    /// Encodes `files` as one parquet object and starts uploading it.
+    ///
+    /// Shared by the full-batch path and the partial-batch flush in `shutdown`.
+    fn spawn_batch_upload(&mut self, files: Vec<Vec<u8>>) {
+        if files.is_empty() {
+            return;
+        }
+
+        let count = files.len();
+        let body = match create_parquet_from_binary_chunks(&files) {
+            Ok(body) => body,
+            // Encoding failure is deterministic, so re-queueing would only reproduce it. Report
+            // the loss loudly instead of panicking inside the guest's `fd_write`.
+            Err(e) => {
+                error!("dropping a batch of {count} files: could not encode it as parquet: {e:#}");
+                return;
             }
+        };
+
+        let key = format!("batch_{}.parquet", Uuid::new_v4());
+        info!("uploading {count} files to s3://{}/{key}", self.bucket);
+
+        let client = self.s3.clone();
+        let bucket = self.bucket.clone();
+        self.uploads.push(tokio::spawn(async move {
+            client
+                .put_object()
+                .bucket(bucket)
+                .key(key)
+                .body(ByteStream::from(body))
+                .send()
+                .await
+        }));
+    }
+
+    /// Queues one guest file, uploading the batch once it is full.
+    fn write_file_to_batch(&mut self, content: Vec<u8>) {
+        self.pending_batches.push(content);
+        debug!(
+            "queued a file, batch is now {}/{}",
+            self.pending_batches.len(),
+            self.batch_size
+        );
+
+        if self.pending_batches.len() >= self.batch_size {
+            let files = self.pending_batches.drain(..).collect::<Vec<_>>();
+            self.spawn_batch_upload(files);
         }
     }
 
-    /// Escribe un fichero a un lote. Cuando se acumulan `batch_size`, los sube juntos.
-    pub fn write_file_to_batch(&mut self, content: Vec<u8>) {
-        self.pending_batches.push(content);
+    /// Awaits every upload started so far.
+    pub async fn drain_uploads(&mut self) {
+        if self.uploads.is_empty() {
+            return;
+        }
 
-        tracing::info!("Added file to batch, current batch size: {}", self.pending_batches.len());
-
-        if  self.pending_batches.len() >= self.batch_size {
-            let files_to_upload = self.pending_batches.drain(..).collect::<Vec<_>>();
-
-            let client = self.s3.clone();
-            // generate random key (not uuid)
-            let key = format!("batch_{}", rand::random::<u16>());
-
-            let compressed = create_parquet_from_binary_chunks(&files_to_upload);
-
-            //write to local first:
-            let local_file_path = format!("{}.parquet", key);
-            std::fs::write(&local_file_path, &compressed)
-                .expect("Failed to write local parquet file");
-
-            tracing::info!("Uploading batch with {} files to S3 with key: {}", files_to_upload.len(), key);
-
-            self.futures.push(self.tokio_runtime.spawn(self.s3
-                .put_object()
-                .bucket(&self.bucket)
-                .key(format!("{}.parquet", key))
-                .body(aws_sdk_s3::primitives::ByteStream::from(compressed))
-                .send()));
+        info!("waiting for {} pending batch uploads...", self.uploads.len());
+        for handle in self.uploads.drain(..) {
+            match handle.await {
+                Ok(Ok(_)) => info!("batch upload complete"),
+                Ok(Err(e)) => error!("batch upload failed: {e}"),
+                Err(e) => error!("batch upload task did not finish: {e}"),
+            }
         }
     }
 }
 
 impl Drop for PeridotBatchCtx {
     fn drop(&mut self) {
-        tracing::info!("Flushing uploads before dropping context...");
-        self.flush_pending_uploads();
+        // `shutdown` is what flushes; reaching here with work outstanding means it was never
+        // called, and a `Drop` impl cannot await the uploads to rescue it.
+        if !self.pending_batches.is_empty() || !self.uploads.is_empty() {
+            warn!(
+                "dropping the batch context with {} unflushed files and {} uploads in flight; \
+                 shutdown() was never called",
+                self.pending_batches.len(),
+                self.uploads.len()
+            );
+        }
     }
 }
 
-pub fn create_parquet_from_binary_chunks(chunks: &[Vec<u8>]) -> Vec<u8> {
-    // Define el schema: una sola columna binaria
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("binary_data", DataType::Binary, false),
-    ]));
+/// Encodes each chunk as one row of a single-column binary parquet file.
+pub fn create_parquet_from_binary_chunks(chunks: &[Vec<u8>]) -> Result<Vec<u8>> {
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "binary_data",
+        DataType::Binary,
+        false,
+    )]));
 
-    // Convierte Vec<Vec<u8>> -> Vec<&[u8]>
     let binary_refs: Vec<&[u8]> = chunks.iter().map(|v| v.as_slice()).collect();
-
-    // Crea BinaryArray desde Vec<&[u8]>
     let array = Arc::new(BinaryArray::from(binary_refs)) as ArrayRef;
 
-    // Crea el RecordBatch
     let batch = RecordBatch::try_new(schema.clone(), vec![array])
-        .expect("fallo al crear RecordBatch");
+        .context("could not build the record batch")?;
 
-    // Crea el buffer Parquet
     let mut buffer = Cursor::new(Vec::new());
     let props = WriterProperties::builder().build();
-    let mut writer = ArrowWriter::try_new(&mut buffer, schema.clone(), Some(props))
-        .expect("fallo al crear ArrowWriter");
+    let mut writer = ArrowWriter::try_new(&mut buffer, schema, Some(props))
+        .context("could not create the parquet writer")?;
+    writer
+        .write(&batch)
+        .context("could not write the record batch")?;
+    writer.close().context("could not finish the parquet file")?;
 
-    writer.write(&batch).expect("fallo al escribir RecordBatch");
-    writer.close().expect("fallo al cerrar ArrowWriter");
-
-    buffer.into_inner() // Devuelve el archivo parquet como Vec<u8>
+    Ok(buffer.into_inner())
 }
-
 
 #[async_trait]
 impl DelegatingWasiCtx for PeridotBatchCtx {
-    fn inner(&mut self) -> &mut WasiP1Ctx {
-        self.inner.inner()
+    fn next(&mut self) -> Option<&mut dyn DelegatingWasiCtx> {
+        Some(&mut *self.next)
+    }
+
+    /// Uploads the final partial batch, then joins every upload, before the process exits.
+    async fn shutdown(&mut self) {
+        if !self.pending_batches.is_empty() {
+            let files = self.pending_batches.drain(..).collect::<Vec<_>>();
+            info!("flushing a final partial batch of {} files", files.len());
+            self.spawn_batch_upload(files);
+        }
+        self.drain_uploads().await;
+        self.next.shutdown().await;
     }
 
     async fn fd_write(
@@ -134,44 +218,58 @@ impl DelegatingWasiCtx for PeridotBatchCtx {
         fd: Fd,
         iovs: CiovecArray,
     ) -> Result<Size, Error> {
-        unsafe {
-            if (fd.inner() < 3 ) {
-                tracing::info!("writing to STDOUT/STDERR, FD={}", fd.inner());
-                return self.inner.fd_write(mem, fd, iovs).await
+        if u32::from(fd) < 3 {
+            return self.next.fd_write(mem, fd, iovs).await;
+        }
+
+        // Buffered until the batch is full, so the bytes must be owned.
+        let buf = memory::payload(mem, iovs)?.into_owned();
+        let len = buf.len();
+        self.write_file_to_batch(buf);
+        debug!("batched {len} bytes written to fd {}", u32::from(fd));
+        Ok(u32::try_from(len)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::array::{Array, BinaryArray};
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    #[test]
+    fn parquet_round_trips_binary_chunks() {
+        let chunks = vec![b"hello".to_vec(), b"world!".to_vec(), Vec::new()];
+
+        let encoded =
+            create_parquet_from_binary_chunks(&chunks).expect("chunks should encode as parquet");
+
+        let reader = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(encoded))
+            .expect("the output should be a readable parquet file")
+            .build()
+            .expect("the reader should build");
+
+        let mut rows: Vec<Vec<u8>> = Vec::new();
+        for batch in reader {
+            let batch = batch.expect("each record batch should decode");
+            let column = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .expect("the single column should be binary");
+            for i in 0..column.len() {
+                rows.push(column.value(i).to_vec());
             }
-
-            let buf = first_non_empty_ciovec(mem, iovs)?;
-            let buf = mem.to_vec(buf)?;
-            let len = buf.len();
-            self.write_file_to_batch(buf);
-            tracing::info!("SKIPPING FD_WRITE, writing {} bytes, FD={}",len, fd.inner());
-            Ok(u32::try_from(len)?)
         }
+
+        assert_eq!(rows, chunks, "every chunk should survive the round trip");
     }
-}
 
-fn read_string(memory: &GuestMemory, ptr: GuestPtr<str>) -> Result<String, GuestError> {
-    Ok(memory.as_cow_str(ptr)?.into_owned())
-}
-
-fn first_non_empty_ciovec(
-    memory: &GuestMemory<'_>,
-    ciovs: CiovecArray,
-) -> Result<GuestPtr<[u8]>, GuestError> {
-    for iov in ciovs.iter() {
-        let iov = memory.read(iov?)?;
-        if iov.buf_len == 0 {
-            continue;
-        }
-        return Ok(iov.buf.as_array(iov.buf_len));
-    }
-    Ok(GuestPtr::new((0, 0)))
-}
-
-impl Deref for PeridotBatchCtx {
-    type Target = PeridotContext;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+    #[test]
+    fn encoding_no_chunks_produces_a_readable_file() {
+        let encoded = create_parquet_from_binary_chunks(&[]).expect("an empty batch should encode");
+        let reader = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(encoded))
+            .expect("the output should still be a readable parquet file");
+        assert_eq!(reader.metadata().file_metadata().num_rows(), 0);
     }
 }

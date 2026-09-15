@@ -5,7 +5,7 @@ authors.workspace = true
 edition.workspace = true
 
 [dependencies]
-rand = "0.8.5"
+uuid = { version = "1.18.1", features = ["v4"] }
 arrow = "50.0.0"
 parquet = "50.0.0"
 chrono = "=0.4.31"
@@ -20,3 +20,7 @@ log = { workspace = true }
 tokio = { workspace = true }
 aws-sdk-s3 = {workspace = true}
 aws-config = { workspace = true, features = ["behavior-version-latest"] }
+serde = { version = "1.0.217", features = ["derive"] }
+
+[dev-dependencies]
+bytes = "1"

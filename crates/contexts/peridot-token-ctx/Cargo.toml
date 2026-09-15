@@ -12,3 +12,4 @@ async-trait = { workspace = true }
 wasmtime = { workspace = true }
 log = { workspace = true }
 wasmtime-wasi = {workspace = true}
+serde = { version = "1.0.217", features = ["derive"] }

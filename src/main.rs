@@ -1,7 +1,7 @@
-use peridot::metrics::{DiskIOMetricsProducer, MetricsSubscriber, MetricsProducer};
+use peridot::metrics::DiskIOMetricsProducer;
 use clap::Parser;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{env, process};
 use wasmtime::{Config, Engine, Linker, Module, Result, Store};
@@ -10,21 +10,25 @@ use peridot::conf::PeridotConfig;
 use peridot::context;
 use peridot::context::{PeridotContext, WasiWrapper};
 use peridot::metrics::MetricsPublisher;
+use peridot::plugin::{Preopen, PluginRegistry};
 
-#[cfg(feature = "token")]
-use peridot::token::TokenBucket;
 use tokio::sync::Mutex;
-#[cfg(feature = "clock")]
-use peridot_clock_ctx::PeridotClockCtx;
-#[cfg(feature = "counter")]
-use peridot_counter_ctx::PeridotCounterCtx;
-#[cfg(feature = "counter")]
-use peridot_counter_ctx::PeridotCounter;
-#[cfg(feature = "s3")]
-use peridot_s3_ctx::PeridotS3Ctx;
-#[cfg(feature = "token")]
-use peridot_token_ctx::PeridotTokenCtx;
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
+
+/// Contexts available to this binary, keyed by the name used in `config.yaml`.
+///
+/// Which of these actually run, and in what order, is decided at run time by the `contexts`
+/// list in the configuration file — building Peridot no longer requires choosing.
+fn build_registry() -> PluginRegistry {
+    let mut registry = PluginRegistry::new();
+    registry.register("counter", peridot_counter_ctx::factory);
+    registry.register("clock", peridot_clock_ctx::factory);
+    registry.register("token", peridot_token_ctx::factory);
+    registry.register("s3", peridot_s3_ctx::factory);
+    registry.register("batch", peridot_batch_ctx::factory);
+    registry.register("syscall-batching", peridot_syscall_batching_ctx::factory);
+    registry
+}
 
 /// Peridot - Transparent Integration of new logic in legacy Wasm modules
 #[derive(Parser, Debug)]
@@ -55,81 +59,73 @@ async fn run_module(
     // Set up WASI
     let args: Vec<String> = config.args.clone();
     println!("Module path: {}", module_path);
-    let module_dir = Path::new(&module_path).parent().unwrap();
-    println!("Module dir: {}",module_dir.display());
+    // `Path::parent` yields `""` for a bare filename, which `preopened_dir` rejects, so fall
+    // back to the working directory. Canonicalizing keeps the preopen an absolute host path,
+    // which is what contexts resolving guest paths against it expect.
+    let module_dir = match Path::new(&module_path).parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    let module_dir = module_dir.canonicalize().unwrap_or(module_dir);
+    println!("Module dir: {}", module_dir.display());
+
+    // Recorded so contexts that open host files themselves can resolve guest paths; the
+    // fd-to-directory mapping inside WasiP1Ctx is not reachable from a context.
+    let preopens = vec![Preopen {
+        host: module_dir.clone(),
+        guest: ".".to_string(),
+    }];
 
     let wasi = WasiCtxBuilder::new()
         .inherit_stdio()
         .preopened_dir(
-        module_dir,
+        &module_dir,
         ".",
         DirPerms::all(),
         FilePerms::all(),
     )?.args(&*args).build_p1();
 
-    #[cfg(feature = "token")]
-    let max_bandwidth: u64 = config.io.max_bandwidth as u64;
-    #[cfg(feature = "token")]
-    let token_bucket = Arc::new(std::sync::Mutex::new(TokenBucket::new(
-        max_bandwidth,
-        max_bandwidth,
-        max_bandwidth,
-    )));
+    // Load any plugin libraries first, so the contexts they provide can be named below.
+    let mut registry = build_registry();
+    for path in &config.plugins {
+        // SAFETY: the operator named this library in their own configuration file, and
+        // `load_library` refuses anything not built against this exact runtime ABI.
+        let added = unsafe { registry.load_library(path) }?;
+        log::info!("loaded plugin {} providing {:?}", path.display(), added);
+    }
+    let registry = registry;
+    let mut chain = registry
+        .build_chain(PeridotContext::boxed(wasi), &config, &preopens)
+        .await?;
+    log::info!("Context chain: {:?}", config.context_names());
 
-    #[cfg(feature = "token")]
-    let peridot_ctx = PeridotTokenCtx::new(
-        PeridotContext::new(wasi),
-        Arc::clone(&token_bucket),
-    );
+    // Metrics have to be collected from the chain before it is moved into the store.
+    let (producers, subscribers) = context::collect_metrics(&mut *chain);
 
-    #[cfg(feature = "counter")]
-    let counter = Arc::new(PeridotCounter::new());
+    context::add_to_linker_async(&mut linker, |wasi_ctx: &mut WasiWrapper| wasi_ctx)?;
 
-    #[cfg(feature = "geds")]
-    let peridot_ctx = PeridotGEDSCtx::new(PeridotContext::new(wasi));
-    #[cfg(feature = "clock")]
-    let peridot_ctx = PeridotClockCtx::new(PeridotContext::new(wasi));
-    #[cfg(feature = "counter")]
-    let peridot_ctx = PeridotCounterCtx::new(PeridotContext::new(wasi), counter.clone());
-    #[cfg(feature = "s3")]
-    let peridot_ctx = PeridotS3Ctx::new(PeridotContext::new(wasi)).await;
-    #[cfg(feature = "token")]
-    context::add_to_linker_async(&mut linker, |wasi_ctx: &mut WasiWrapper<PeridotTokenCtx>| wasi_ctx )?;
-    #[cfg(feature = "geds")]
-    context::add_to_linker_async(&mut linker, |wasi_ctx: &mut WasiWrapper<PeridotGEDSCtx>| wasi_ctx )?;
-    #[cfg(feature = "clock")]
-    context::add_to_linker_async(&mut linker, |wasi_ctx: &mut WasiWrapper<PeridotClockCtx>| wasi_ctx )?;
-    #[cfg(feature = "counter")]
-    context::add_to_linker_async(&mut linker, |wasi_ctx: &mut WasiWrapper<PeridotCounterCtx>| wasi_ctx )?;
-    #[cfg(feature = "s3")]
-    context::add_to_linker_async(&mut linker, |wasi_ctx: &mut WasiWrapper<PeridotS3Ctx>| wasi_ctx )?;
-
-    let wrapped_ctx = WasiWrapper::new(peridot_ctx);
-    let mut store = Store::new(&engine, wrapped_ctx);
+    let mut store = Store::new(&engine, WasiWrapper::new(chain));
     linker.allow_shadowing(true);
 
-    let metrics_publisher = Some(Arc::new(Mutex::new(MetricsPublisher::new(vec![], vec![]))));
+    let metrics_publisher = Arc::new(Mutex::new(MetricsPublisher::new(vec![], vec![])));
 
     // Subscribe metrics producers and start metrics update thread
-    if let Some(mp) = &metrics_publisher {
-        #[cfg(feature = "token")]
-        mp.lock()
-            .await
-            .subscribe(Arc::clone(&(token_bucket as Arc<std::sync::Mutex<dyn MetricsSubscriber + Send + Sync>>)));
+    {
+        let mut mp = metrics_publisher.lock().await;
+        for producer in producers {
+            mp.subscribe_producer(producer);
+        }
+        for subscriber in subscribers {
+            mp.subscribe(subscriber);
+        }
+        mp.subscribe_producer(Arc::new(DiskIOMetricsProducer {}));
 
-        #[cfg(feature = "counter")]
-        mp.lock()
-            .await
-            .subscribe_producer(Arc::clone(&(counter as Arc<dyn MetricsProducer + Send + Sync>)));
-
-        mp.lock()
-            .await
-            .subscribe_producer(Arc::new(DiskIOMetricsProducer {}));
-
-        mp.lock()
-            .await
-            .spawn_metrics_update_thread(&config)
-            .await?;
+        // The metrics thread reports to the overseer, so it is only useful with one configured.
+        if config.overseer_address.is_some() {
+            mp.spawn_metrics_update_thread(&config).await?;
+        } else {
+            log::info!("No overseer_address configured; not starting the metrics thread.");
+        }
     }
 
     // Load and run the WebAssembly module
@@ -140,12 +136,11 @@ async fn run_module(
     let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
     start.call_async(&mut store, ()).await?;
 
-    #[cfg(feature="s3")]
-    store.data_mut().ctx.drain_uploads().await;
+    // Let every link flush whatever work it deferred (uploads, batches, log files).
+    store.data_mut().ctx.shutdown().await;
 
-    #[cfg(feature = "counter")]
-    if let Some(mp) = metrics_publisher {
-        mp.lock().await.stop_metrics_update_thread().await;
+    if config.overseer_address.is_some() {
+        metrics_publisher.lock().await.stop_metrics_update_thread().await;
     }
     Ok(())
 }

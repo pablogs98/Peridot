@@ -4,6 +4,12 @@ version.workspace = true
 authors.workspace = true
 edition.workspace = true
 
+# Built as a dynamic library and loaded at run time, so a runtime without IBM GEDS installed
+# neither builds nor links it. Build this package explicitly on a machine that has GEDS:
+#   cargo build -p peridot-geds-ctx --release
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 peridot = { workspace = true }
 wiggle = { workspace = true }

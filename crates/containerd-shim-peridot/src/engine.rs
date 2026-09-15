@@ -8,9 +8,8 @@ use oci_spec::image::MediaType;
 use peridot::conf::PeridotConfig;
 use peridot::context;
 use peridot::context::WasiWrapper;
-use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher, MetricsSubscriber};
-#[cfg(feature = "token")]
-use peridot::token::TokenBucket;
+use peridot::metrics::{DiskIOMetricsProducer, MetricsPublisher};
+use peridot::plugin::{Preopen, PluginRegistry};
 use std::fs::File;
 use std::hash::Hash;
 use std::io::Write;
@@ -19,10 +18,21 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use wasmtime::{Config, Engine, Linker, Module, Precompiled, Store};
 use wasmtime_wasi::WasiCtxBuilder;
-use peridot_counter_ctx::{PeridotCounter, PeridotCounterCtx};
 use crate::constants;
-#[cfg(feature = "token")]
-use peridot_token_ctx::PeridotTokenCtx;
+
+/// Contexts available to the shim, keyed by the name used in the Peridot config.
+///
+/// Selection happens at run time through that config's `contexts` list.
+fn build_registry() -> PluginRegistry {
+    let mut registry = PluginRegistry::new();
+    registry.register("counter", peridot_counter_ctx::factory);
+    registry.register("clock", peridot_clock_ctx::factory);
+    registry.register("token", peridot_token_ctx::factory);
+    registry.register("s3", peridot_s3_ctx::factory);
+    registry.register("batch", peridot_batch_ctx::factory);
+    registry.register("syscall-batching", peridot_syscall_batching_ctx::factory);
+    registry
+}
 
 pub struct PeridotShim;
 
@@ -200,57 +210,42 @@ impl PeridotSandbox {
     ) -> Result<i32> {
         debug!("execute module");
 
-        let ctx_p1 = wasi_builder(ctx, config)?.build_p1();
-        let mut module_linker = Linker::new(&self.engine);
+        let ctx_p1 = wasi_builder(ctx, config.clone())?.build_p1();
+        let mut module_linker: Linker<WasiWrapper> = Linker::new(&self.engine);
         debug!("init linker");
 
-        #[cfg(feature = "token")]
-        let max_bandwidth: u64 = config.io.max_bandwidth as u64;
-        #[cfg(feature = "token")]
-        let token_bucket = Arc::new(std::sync::Mutex::new(TokenBucket::new(
-            max_bandwidth,
-            max_bandwidth,
-            max_bandwidth,
-        )));
+        // Assemble the context chain named by the config, on top of plain WASI.
+        let registry = build_registry();
+        // The shim preopens the whole root; contexts that open host files themselves need
+        // this to resolve guest paths, since WasiP1Ctx does not expose the mapping.
+        let preopens = vec![Preopen {
+            host: "/".into(),
+            guest: "/".to_string(),
+        }];
 
-        #[cfg(feature = "token")]
-        let peridot_ctx = PeridotTokenCtx::new(
-            context::PeridotContext::new(ctx_p1),
-            Arc::clone(&token_bucket),
-        );
+        let mut chain = registry
+            .build_chain(context::PeridotContext::boxed(ctx_p1), &config, &preopens)
+            .await?;
+        info!("context chain: {:?}", config.context_names());
 
-        #[cfg(feature = "counter")]
-        let counter = Arc::new(PeridotCounter::new());
-        
-        #[cfg(feature = "counter")]
-        let peridot_ctx = PeridotCounterCtx::new(context::PeridotContext::new(ctx_p1), counter);
-        
-        #[cfg(feature = "token")]
+        // Metrics have to be collected before the chain is moved into the store.
+        let (producers, subscribers) = context::collect_metrics(&mut *chain);
+
         context::add_to_linker_async(
             &mut module_linker,
-            |wasi_ctx: &mut WasiWrapper<PeridotTokenCtx>| wasi_ctx,
-        )?;
-        
-        #[cfg(feature = "counter")]
-        context::add_to_linker_async(
-            &mut module_linker,
-            |wasi_ctx: &mut WasiWrapper<PeridotCounterCtx>| wasi_ctx,
+            |wasi_ctx: &mut WasiWrapper| wasi_ctx,
         )?;
 
-        let wrapped_ctx = WasiWrapper::new(peridot_ctx);
+        let mut store: Store<WasiWrapper> = Store::new(&self.engine, WasiWrapper::new(chain));
 
-        let mut store = Store::new(&self.engine, wrapped_ctx);
-
-        #[cfg(feature = "token")]
-        let token_bucket =
-            token_bucket as Arc<std::sync::Mutex<dyn MetricsSubscriber + Send + Sync>>;
-
-        #[cfg(feature = "token")]
         if let Some(metrics_publisher) = &self.metrics_publisher {
-            metrics_publisher
-                .lock()
-                .await
-                .subscribe(Arc::clone(&token_bucket));
+            let mut mp = metrics_publisher.lock().await;
+            for producer in producers {
+                mp.subscribe_producer(producer);
+            }
+            for subscriber in subscribers {
+                mp.subscribe(subscriber);
+            }
         }
 
         info!("instantiating instance");
@@ -264,10 +259,15 @@ impl PeridotSandbox {
 
         info!("running start function {func:?}");
 
-        start_func
+        let result = start_func
             .call_async(&mut store, &[], &mut [])
             .await
-            .into_error_code()
+            .into_error_code();
+
+        // Let every link flush whatever work it deferred (uploads, batches, log files).
+        store.data_mut().ctx.shutdown().await;
+
+        result
     }
 
     async fn execute(

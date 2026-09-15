@@ -1,26 +1,40 @@
 use async_trait::async_trait;
-use peridot::context::{DelegatingWasiCtx, PeridotContext};
+use log::debug;
+use peridot::context::DelegatingWasiCtx;
+use peridot::plugin::{BoxedContextFuture, ContextConfig};
 use peridot::metrics::MetricsProducer;
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use wasmtime_wasi::p1::types::{CiovecArray, Error, Fd, Filesize, Size};
-use wasmtime_wasi::p1::WasiP1Ctx;
 use wiggle::GuestMemory;
 
+/// Counts the bytes the guest writes, and reports the running total as a metric.
+///
+/// This is the reference implementation of a Peridot context: it holds the next link in the
+/// chain, overrides the two hostcalls it cares about, and lets the [`DelegatingWasiCtx`]
+/// defaults forward the other forty-odd untouched.
 pub struct PeridotCounterCtx {
-    inner: PeridotContext,
-    pub counter: Arc<PeridotCounter>
+    next: Box<dyn DelegatingWasiCtx>,
+    counter: Arc<PeridotCounter>,
 }
+
 impl PeridotCounterCtx {
-    pub fn new(inner: PeridotContext, counter: Arc<PeridotCounter>) -> Self {
-        std::env::set_var("WASMTIME_LOG", "wasmtime_wasi=trace");
-        Self { inner, counter }
+    pub fn new(next: Box<dyn DelegatingWasiCtx>, counter: Arc<PeridotCounter>) -> Self {
+        Self { next, counter }
     }
+
     pub fn get_counter(&self) -> &Arc<PeridotCounter> {
         &self.counter
     }
+}
+
+/// Registry entry point. Registered under the name `counter`.
+pub fn factory(next: Box<dyn DelegatingWasiCtx>, _config: ContextConfig<'_>) -> BoxedContextFuture<'_> {
+    Box::pin(async move {
+        Ok(Box::new(PeridotCounterCtx::new(next, Arc::new(PeridotCounter::new())))
+            as Box<dyn DelegatingWasiCtx>)
+    })
 }
 
 pub struct PeridotCounter {
@@ -43,6 +57,12 @@ impl PeridotCounter {
     }
 }
 
+impl Default for PeridotCounter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MetricsProducer for PeridotCounter {
     fn produce(&self, metrics: &mut HashMap<String, f64>) {
         metrics.insert("written_bytes".into(), self.get_counter() as f64);
@@ -51,10 +71,14 @@ impl MetricsProducer for PeridotCounter {
 
 #[async_trait]
 impl DelegatingWasiCtx for PeridotCounterCtx {
-    fn inner(&mut self) -> &mut WasiP1Ctx {
-        self.inner.inner()
+    fn next(&mut self) -> Option<&mut dyn DelegatingWasiCtx> {
+        Some(&mut *self.next)
     }
-    
+
+    fn metrics_producers(&self) -> Vec<Arc<dyn MetricsProducer + Send + Sync>> {
+        vec![self.counter.clone() as Arc<dyn MetricsProducer + Send + Sync>]
+    }
+
     async fn fd_pwrite(
         &mut self,
         mem: &mut GuestMemory<'_>,
@@ -62,10 +86,13 @@ impl DelegatingWasiCtx for PeridotCounterCtx {
         iovs: CiovecArray,
         offset: Filesize,
     ) -> Result<Size, Error> {
-        let written_bytes = self.inner.fd_pwrite(mem, fd, iovs, offset).await?;
-        println!("Written bytes: {}", written_bytes);
+        let written_bytes = self.next.fd_pwrite(mem, fd, iovs, offset).await?;
         self.counter.increment_counter(written_bytes as u64);
-        println!("Counter after write: {}", self.counter.get_counter());
+        debug!(
+            "fd_pwrite wrote {} bytes, total {}",
+            written_bytes,
+            self.counter.get_counter()
+        );
         Ok(written_bytes)
     }
 
@@ -75,24 +102,19 @@ impl DelegatingWasiCtx for PeridotCounterCtx {
         fd: Fd,
         iovs: CiovecArray,
     ) -> Result<Size, Error> {
-        let written_bytes = self.inner.fd_write(mem, fd, iovs).await?;
-        println!("Written bytes: {}", written_bytes);
+        let written_bytes = self.next.fd_write(mem, fd, iovs).await?;
         self.counter.increment_counter(written_bytes as u64);
-        println!("Counter after write: {}", self.counter.get_counter());
+        debug!(
+            "fd_write wrote {} bytes, total {}",
+            written_bytes,
+            self.counter.get_counter()
+        );
         Ok(written_bytes)
-    }
-}
-
-impl Deref for PeridotCounterCtx {
-    type Target = PeridotContext;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
     }
 }
 
 impl Drop for PeridotCounterCtx {
     fn drop(&mut self) {
-            println!("Count {}", self.counter.get_counter()); 
+        log::info!("Total bytes written: {}", self.counter.get_counter());
     }
 }

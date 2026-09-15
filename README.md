@@ -1,81 +1,366 @@
 # Peridot: An I/O-Extensible Execution Environment for WebAssembly Containers
+
 ![Rust workflow](https://github.com/pablogs98/peridot/actions/workflows/rust.yml/badge.svg)
+
+Peridot runs a WebAssembly module under WASI preview 1 and lets you replace the implementation of
+individual hostcalls with a **context** — a link in a chain that sits between the guest and the
+real WASI implementation. A context can count bytes, rate-limit I/O, redirect `path_open` to
+object storage, batch small writes, or anything else expressible at the hostcall boundary, without
+the guest module being recompiled or even aware.
+
+Which contexts run is decided **at run time**, in the configuration file. There are no cargo
+feature flags.
+
+---
 
 ## Requirements
 
-Install ```protoc```
+| Requirement | Why |
+|---|---|
+| A recent stable Rust toolchain | The workspace tracks wasmtime 38, which sets a fairly recent floor. `rustup update` is the safe move. |
+| `protoc` | `peridot-overseer-grpc` compiles its protobufs at build time. |
+| A C toolchain and `cmake` | `aws-lc-sys`, pulled in by the AWS SDK that the `s3` and `batch` contexts use. |
+| [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) *(optional)* | Only to build the C guest modules under `c-wasm/`. Any `wasm32-wasip1` binary works. |
+
+On Debian/Ubuntu:
 
 ```bash
-sudo apt install protobuf-compiler
+sudo apt install protobuf-compiler build-essential cmake pkg-config
 ```
 
-Install [IBM GEDS](https://github.com/IBM/GEDS):
+Two workspace members cannot be built everywhere and are therefore **not** part of the default
+build: `containerd-shim-peridot`, which depends on `procfs` through libcgroups and is Linux-only,
+and `peridot-geds-ctx`, which does not compile until you have IBM GEDS installed (see
+[GEDS](#geds)). Both are still full workspace members, so build either explicitly with `-p`.
 
-```bash
-install geds dependencies ----->
-git clone https://github.com/IBM/GEDS
-geds install commands (install dir must be /usr/local) set variables and add commands. ----->
-```
+---
 
-## 📦 Build
-
-Make sure you have Rust (1.73+) and cargo installed.
+## Build
 
 ```bash
 cargo build --release
 ```
 
-To build with a specific feature/context, for example `token`:
+That produces `target/release/peridot`. Every built-in context is compiled in; none of them is
+selected until a configuration file names it.
+
+To build one of the two non-default members, name it:
 
 ```bash
-cargo build --release --features token
+cargo build --release -p containerd-shim-peridot   # Linux only
 ```
 
 ---
 
-## ▶️ Usage
+## Quick start: running a module with the `counter` context
 
-```
-peridot <CONFIG_PATH> --module <WASM_FILE> [OPTIONS]
-```
+`counter` is the reference context — it intercepts `fd_write` and `fd_pwrite`, adds up the bytes
+the guest writes, and publishes the running total as a `written_bytes` metric. It needs no
+external services, which makes it a good first run.
 
-### Arguments
+### 1. Get a WebAssembly module
 
-| Argument          | Required | Description                           |
-|-------------------|----------|---------------------------------------|
-| `<CONFIG_PATH>`   | ✔️       | Path to the YAML config file          |
-| `--module, -m`    | ✔️       | Path to the WebAssembly module to run |
-| `--log-level, -l` | ✖️       | Log verbosity (default: `info`)       |
-| `--overseer, -o`  | ✖️       | Path to overseer                      |
-
----
-
-## 💡 Example Execution
+Any `wasm32-wasip1` binary will do. To build one of the C examples in this repository:
 
 ```bash
-peridot --features [s3, token, geds,...] config.yaml \
-    --module path/to/module.wasm \
-    --log-level debug
+$WASI_SDK_PATH/bin/clang --target=wasm32-wasip1 \
+    c-wasm/helloworld/main.c -o hello.wasm
 ```
 
----
+On wasi-sdk releases older than 24, the target triple is spelled `wasm32-wasi`.
 
-## 📝 Example `config.yaml`
+The `c-wasm/` tree also carries CMake projects, buildable with the wasi-sdk toolchain file:
+
+```bash
+cmake -S c-wasm -B c-wasm/build \
+    -DCMAKE_TOOLCHAIN_FILE=$WASI_SDK_PATH/share/cmake/wasi-sdk.cmake
+cmake --build c-wasm/build
+```
+
+A Rust guest works just as well — `rustup target add wasm32-wasip1`, then
+`cargo build --target wasm32-wasip1`.
+
+### 2. Write a configuration file
 
 ```yaml
-args:
-  - "foo"
-  - "bar"
+# config.yaml
+args: []
+
+contexts:
+  - counter
 
 io:
   demand: 150.0
-  max_bandwidth: 300.0 
+  max_bandwidth: 300.0
 
 cpu:
   demand: 75.0
   utilization: 0.85
 ```
 
+### 3. Run it
+
+```bash
+./target/release/peridot hello.wasm config.yaml --log-level debug
+```
+
+The module path comes first, the configuration file second. At `debug` you will see the context
+report each intercepted write, and the running total when the chain is torn down:
+
+```
+[INFO  peridot] Context chain: ["counter"]
+[DEBUG peridot_counter_ctx] fd_write wrote 14 bytes, total 14
+[INFO  peridot_counter_ctx] Total bytes written: 14
+```
+
+Peridot preopens the **module's own directory** for the guest as `.`, so a module that opens
+`data.txt` gets the file sitting next to the `.wasm`.
+
+---
+
+## Command line
+
+```
+peridot <MODULE_PATH> <CONFIG_PATH> [OPTIONS]
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `<MODULE_PATH>` | ✔️ | The WebAssembly module to run |
+| `<CONFIG_PATH>` | ✔️ | The YAML configuration file |
+| `--log-level, -l` | ✖️ | Log verbosity, default `info`. Ignored if `RUST_LOG` is set. |
+
+Contexts are **not** selectable on the command line — that is what the configuration file is for.
+
+---
+
+## Configuration
+
+```yaml
+# Optional. Without it, no metrics thread is started.
+overseer_address: "http://127.0.0.1:50051"
+
+# Arguments passed through to the guest as argv.
+args:
+  - "foo"
+  - "bar"
+
+# Optional. Plugin libraries to load before the chain is built.
+plugins:
+  - ./target/release/libperidot_trace_plugin.so
+
+# Optional. The context chain, outermost first.
+# Absent or empty means plain WASI with no interception at all.
+contexts:
+  - counter
+  - name: token
+    config:
+      max_bandwidth: 200
+
+# Required.
+io:
+  demand: 150.0
+  max_bandwidth: 300.0
+
+cpu:
+  demand: 75.0
+  utilization: 0.85
+```
+
+`args`, `io` and `cpu` are required; `overseer_address`, `plugins` and `contexts` may be omitted.
+
+Each entry in `contexts` is either a bare name or a `name` with its own `config` block. Contexts
+that take no settings can always be written as a bare name.
+
+---
+
+## Contexts
+
+A context chain composes like middleware. With `contexts: [counter, token]`, `counter` is
+outermost: it sees each hostcall first and passes it to `token`, which passes it to the real WASI
+implementation. Results travel back out in reverse. A context overrides only the hostcalls it
+cares about; the other forty-odd forward automatically.
+
+| Name | Replaces | Settings |
+|---|---|---|
+| `counter` | `fd_write`, `fd_pwrite` — counts bytes written | — |
+| `token` | `fd_read`/`fd_write`/`fd_pread`/`fd_pwrite` — rate limiting | `max_bandwidth` (defaults to `io.max_bandwidth`) |
+| `clock` | `clock_time_get` and the I/O calls — latency tracing | — |
+| `s3` | `path_open`/`fd_write`/`fd_close` on `s3://` paths | credentials from the environment |
+| `geds` | the same, on `geds://` paths | see [GEDS](#geds) below |
+| `batch` | `fd_write` — accumulates files, uploads them as one parquet object | `batch_size`, `bucket` (required) |
+| `syscall-batching` | `path_open` and the write path — coalesces small writes | `num_writes` (default `1`, which disables batching) |
+
+All of these except `geds` are built into the binary. `geds` ships as a plugin, because it cannot
+be built without a native IBM GEDS installation.
+
+Metrics a context publishes (`counter`'s `written_bytes`, for instance) are collected at startup
+and reported to the overseer. With no `overseer_address` configured, no metrics thread runs and
+contexts fall back to logging.
+
+---
+
+## GEDS
+
+[IBM GEDS](https://github.com/IBM/GEDS) is a distributed ephemeral data store. The `geds` context
+redirects guest file operations on `geds://` paths to it, encrypting object contents with AES-256-GCM
+on the way out.
+
+It is set up differently from every other context: GEDS is a native library that must be present on
+the machine, so `peridot-geds-ctx` is **not** compiled into the binary and is **not** a member of
+the default build. It is loaded at run time as a plugin instead. A machine without GEDS therefore
+neither builds nor links it.
+
+### 1. Install GEDS
+
+Follow the upstream build instructions at <https://github.com/IBM/GEDS>. Install it to a prefix
+whose Rust bindings land where the manifest expects them — with the default prefix `/usr/local`,
+that is `/usr/local/rust`.
+
+### 2. Enable the dependency
+
+`crates/contexts/peridot-geds-ctx/Cargo.toml` ships with the binding commented out so the crate
+stays buildable on machines without GEDS. Uncomment it, and correct the path if you installed
+somewhere other than `/usr/local`:
+
+```toml
+geds_rs = { path = "/usr/local/rust" }
+```
+
+### 3. Build the plugin
+
+```bash
+cargo build --release -p peridot-cli -p peridot-geds-ctx
+```
+
+> Build the plugin **and** the runtime in one Cargo invocation. Contexts cross the library
+> boundary as ordinary Rust types, which have no stable ABI, so both sides must link one identical
+> build of `peridot`. See [Plugins](#plugins-adding-a-context-without-rebuilding-peridot) for what
+> happens if they do not.
+
+This produces `target/release/libperidot_geds_ctx.so`.
+
+### 4. Set the environment
+
+The context reads its S3 backing-store credentials from the environment and panics if they are
+missing:
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `S3_ENDPOINT` | ✔️ | Endpoint of the object store GEDS caches from |
+| `S3_ACCESS_KEY` | ✔️ | Access key for that store |
+| `S3_SECRET_KEY` | ✔️ | Secret key for that store |
+| `GEDS_CIPHER_KEY` | ✖️ | Hex-encoded 32-byte AES-256 key |
+
+> **Set `GEDS_CIPHER_KEY` if you intend to read the data back.** When it is unset the context
+> generates a fresh random key at startup, so objects written by one run cannot be decrypted by
+> the next. Generate one with `openssl rand -hex 32`.
+
+### 5. Point the configuration at it
+
+```yaml
+args: []
+
+plugins:
+  - ./target/release/libperidot_geds_ctx.so
+
+contexts:
+  - geds
+
+io:
+  demand: 150.0
+  max_bandwidth: 300.0
+
+cpu:
+  demand: 75.0
+  utilization: 0.85
+```
+
+The guest then addresses objects as `geds://<bucket>/<key>` — an ordinary `open`, `write`, `read`
+or `unlink` on such a path is serviced by GEDS instead of the filesystem. Paths that do not start
+with `geds://` fall through to the next context untouched, so a module can mix both freely.
+
+If GEDS fails to start, the context logs the error and falls back to the local filesystem.
+
+---
+
+## Plugins: adding a context without rebuilding Peridot
+
+A context can live outside the runtime, as a `cdylib` loaded at startup. Point `plugins:` at the
+library and its contexts become usable in `contexts:`:
+
+```yaml
+plugins:
+  - ./target/release/libperidot_trace_plugin.so
+contexts:
+  - name: trace
+    config: { prefix: "T" }
+```
+
+To write one, add `crate-type = ["cdylib"]` to the plugin crate, implement the context as usual,
+and declare the entry points:
+
+```rust
+peridot::export_peridot_plugin! {
+    "trace" => crate::factory,
+}
+```
+
+`crates/plugins/peridot-trace-plugin` is a complete working example. It is deliberately not a
+dependency of the `peridot` binary — that is the point.
+
+> **Build the plugin and the runtime in the same Cargo invocation:**
+>
+> ```bash
+> cargo build --release -p peridot-cli -p peridot-trace-plugin
+> ```
+>
+> Contexts cross the boundary as ordinary Rust types (`Box<dyn DelegatingWasiCtx>`, boxed
+> futures), which have no stable ABI, so both sides must link one *identical* build of `peridot`.
+> Cargo resolves features per invocation, so building them separately can silently produce two
+> different builds of `peridot` even from the same workspace and lockfile.
+>
+> Peridot checks two things before calling into a library and refuses to load on either mismatch:
+> a version fingerprint (Peridot version, rustc version, target triple), and a type probe derived
+> from `TypeId`, which additionally catches differing dependency versions, features, or a
+> separately compiled `peridot` — cases the version string cannot see.
+
+---
+
+## Writing a context
+
+Implement `DelegatingWasiCtx` (from the `peridot` crate), overriding only the hostcalls you care
+about — the default bodies forward everything else to the next context in the chain. Then expose a
+`factory` function. To build it into the binary, register it in `build_registry` in `src/main.rs`
+(and in `crates/containerd-shim-peridot/src/engine.rs` for the shim); to ship it separately, use
+`export_peridot_plugin!` as above. See `crates/contexts/peridot-counter-ctx` for the reference
+implementation.
+
+Overrides receive `&mut GuestMemory<'_>`, a borrow of the guest's linear memory. Use the helpers in
+`peridot::memory` (`payload`, `read_path`) rather than `to_vec`: they return a `Cow` that borrows
+guest memory directly and only copies when the guest uses **shared** memory, where wiggle cannot
+hand out a borrow safely.
+
+Note that borrowing only pays off if the context consumes the bytes before the hostcall returns. A
+context that defers work — a spawned upload, a buffer flushed later — must call `into_owned()`, and
+that copy is unavoidable.
+
+A context with in-flight background work should override `shutdown`, which runs after the guest's
+`_start` returns, outermost link first. Flush there, then forward to the next link.
+
+A context needing real host paths (to open files itself) gets the runtime's preopened directories
+via `ContextConfig::preopens` and `ContextConfig::resolve`, since the descriptor-to-directory
+mapping inside `WasiP1Ctx` is private to wasmtime.
+
+---
+
 ## Acknowledgements
-<img src="https://user-images.githubusercontent.com/45240979/228180946-606cb75e-46c9-429c-a62b-ea9098c375a0.svg"  height="65">
-This project has received funding from the European Union's Horizon Europe (HE) Research and Innovation Programme (RIA) under ...
+
+<img src="https://user-images.githubusercontent.com/45240979/228180946-606cb75e-46c9-429c-a62b-ea9098c375a0.svg" height="65">
+
+This work was partially conducted during Pablo Gimeno Sarroca's internship at IBM Research Zürich
+as part of the CLOUDSTARS EU mobility project (101086248). Supported by the European Union through
+the projects SIXG (101291424) and CloudSkin (101092646), and by the Spanish MICIU/AEI
+(PID2023-148202OB-C21). With the support of the Joan Oró predoctoral grant program from the
+Department of Research and Universities of the Government of Catalonia and co-financing by the
+European Social Fund Plus.
