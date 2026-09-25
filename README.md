@@ -1,7 +1,5 @@
 # Peridot: An I/O-Extensible Execution Environment for WebAssembly Containers
 
-![Rust workflow](https://github.com/pablogs98/peridot/actions/workflows/rust.yml/badge.svg)
-
 Peridot runs a WebAssembly module under WASI preview 1 and lets you replace the implementation of
 individual hostcalls with a **context**, a link in a chain that sits between the guest and the
 real WASI implementation. A context can count bytes, rate-limit I/O, redirect `path_open` to
