@@ -200,7 +200,6 @@ cares about; the other forty-odd forward automatically.
 |---|---|---|
 | `counter` | `fd_write`, `fd_pwrite`: counts bytes written | None |
 | `token` | `fd_read`/`fd_write`/`fd_pread`/`fd_pwrite`: rate limiting | `max_bandwidth` (defaults to `io.max_bandwidth`) |
-| `clock` | `clock_time_get` and the I/O calls: latency tracing | None |
 | `s3` | `path_open`/`fd_write`/`fd_close` on `s3://` paths | credentials from the environment |
 | `geds` | the same, on `geds://` paths | see [GEDS](#geds) below |
 | `batch` | `fd_write`: accumulates files, uploads them as one parquet object | `batch_size`, `bucket` (required) |

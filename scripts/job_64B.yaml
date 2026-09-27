@@ -1,5 +1,0 @@
-/home/ubuntu/peridot/c-wasm/write_1g/write_1g.wasm:
-  args: [ 64 64 ]
-  peridot_config:
-    demand: 62500000
-    priority: 4

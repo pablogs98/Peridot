@@ -26,7 +26,7 @@ mkdir -p "$OUT/resources"
 
 # C guests. Each is a single translation unit; -lm is needed by the two that
 # use sqrt/pow.
-for guest in hostcall_latency iops io_writer read_write helloworld; do
+for guest in hostcall_latency iops io_writer helloworld; do
     src="$REPO/c-wasm/$guest/main.c"
     [[ -f "$src" ]] || { echo "missing $src" >&2; exit 1; }
     echo "building $guest.wasm"

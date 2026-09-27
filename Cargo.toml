@@ -11,7 +11,6 @@ members = [
     "crates/containerd-shim-peridot",
     "crates/contexts/imagenet-preprocessing",
     "crates/peridot",
-    "crates/contexts/peridot-clock-ctx",
     "crates/contexts/peridot-geds-ctx",
     "crates/peridot-overseer",
     "crates/peridot-overseer-grpc",
@@ -39,7 +38,6 @@ default-members = [
     "crates/peridot-overseer",
     "crates/peridot-overseer-grpc",
     "crates/contexts/imagenet-preprocessing",
-    "crates/contexts/peridot-clock-ctx",
     "crates/contexts/peridot-s3-ctx",
     "crates/contexts/peridot-batch-ctx",
     "crates/contexts/peridot-syscall-batching-ctx",
@@ -82,7 +80,6 @@ async-trait = "0.1.85"
 [dependencies]
 nix = { version = "0.29.0", features = ["process"] }
 peridot-token-ctx = { path = "crates/contexts/peridot-token-ctx" }
-peridot-clock-ctx = { path = "crates/contexts/peridot-clock-ctx" }
 peridot-s3-ctx = { path = "crates/contexts/peridot-s3-ctx" }
 peridot-counter-ctx = { path = "crates/contexts/peridot-counter-ctx" }
 peridot-batch-ctx = { path = "crates/contexts/peridot-batch-ctx" }

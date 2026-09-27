@@ -7,6 +7,8 @@ the upstream owners have not granted.
 
 ---
 
+## Redistributed in this repository
+
 ### Sample images
 
 `crates/contexts/imagenet-preprocessing/resources/banana.jpg`,

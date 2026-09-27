@@ -22,7 +22,6 @@ use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 fn build_registry() -> PluginRegistry {
     let mut registry = PluginRegistry::new();
     registry.register("counter", peridot_counter_ctx::factory);
-    registry.register("clock", peridot_clock_ctx::factory);
     registry.register("token", peridot_token_ctx::factory);
     registry.register("s3", peridot_s3_ctx::factory);
     registry.register("batch", peridot_batch_ctx::factory);

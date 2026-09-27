@@ -84,8 +84,6 @@ COPY artifact/configs      /artifact/configs
 COPY artifact/experiments  /artifact/experiments
 COPY artifact/plots        /artifact/plots
 COPY artifact/results/reference /artifact/results/reference
-COPY artifact/CLAIMS.txt         /artifact/CLAIMS.txt
-COPY artifact/CLAIMS-SUMMARY.txt /artifact/CLAIMS-SUMMARY.txt
 
 # The guide, the licence and the reference manual sit at the image root, in the
 # same arrangement as the repository, so every relative link in the guide

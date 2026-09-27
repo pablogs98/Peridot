@@ -121,9 +121,6 @@ docker compose -f artifact/docker-compose.yml exec peridot bash
 | [§4.2, Fig. 6](#figure-6-in-runtime-parquet-batching-42): in-runtime batching beats an external batcher | `exp_storage.sh` | ~8 min |
 | [§4.3, Fig. 7](#figure-7-wasi-hostcall-batching-43): hostcall batching raises write IOPS | `exp_hostcall_batching.sh` | ~2 min |
 
-[CLAIMS.txt](artifact/CLAIMS.txt) restates each claim in the paper's own
-words, including the functional ones no single command covers.
-
 ### Running everything at once
 
 ```bash
@@ -208,7 +205,7 @@ synchronous mode (`sync: true`, each upload awaited inside `fd_write`).
 **Expected.** `s3-async-ctx` ahead of `s3-sync-ctx`. Observed 107 vs 49 MB/s,
 a factor of 2.2 against the paper's 5.1x on Amazon S3; `artifact/env.example`
 shows how to point at a remote store. The `s3fs` and `geds-ctx` rows are not
-run, see [Not reproduced](#not-reproduced-and-why).
+run, see [Not reproduced](#not-reproduced).
 
 ### Figure 6: in-runtime Parquet batching (§4.2)
 
@@ -337,7 +334,7 @@ artifact/
 | `io_writer.wasm` | `c-wasm/io_writer` | Figure 5, smoke test |
 | `iops.wasm` | `c-wasm/iops` | Figure 7 |
 | `imagenet-preprocessing.wasm` | `crates/contexts/imagenet-preprocessing` | Table 1, Figure 6 |
-| `read_write.wasm`, `helloworld.wasm` | `c-wasm/` | ad-hoc use |
+| `helloworld.wasm` | `c-wasm/helloworld` | ad-hoc use |
 
 `bin/build-guests.sh` rebuilds them from source. It needs wasi-sdk and is not
 required to run the experiments.

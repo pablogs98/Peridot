@@ -24,7 +24,6 @@ tokio = { workspace = true }
 peridot = { workspace = true }
 peridot-token-ctx = {path = "../contexts/peridot-token-ctx"}
 peridot-counter-ctx = {path = "../contexts/peridot-counter-ctx"}
-peridot-clock-ctx = {path = "../contexts/peridot-clock-ctx"}
 peridot-s3-ctx = {path = "../contexts/peridot-s3-ctx"}
 peridot-batch-ctx = {path = "../contexts/peridot-batch-ctx"}
 peridot-syscall-batching-ctx = {path = "../contexts/peridot-syscall-batching-ctx"}

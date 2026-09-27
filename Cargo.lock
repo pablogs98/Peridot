@@ -1497,7 +1497,6 @@ dependencies = [
  "oci-spec 0.8.3",
  "peridot",
  "peridot-batch-ctx",
- "peridot-clock-ctx",
  "peridot-counter-ctx",
  "peridot-s3-ctx",
  "peridot-syscall-batching-ctx",
@@ -4132,7 +4131,6 @@ dependencies = [
  "nix 0.29.0",
  "peridot",
  "peridot-batch-ctx",
- "peridot-clock-ctx",
  "peridot-counter-ctx",
  "peridot-s3-ctx",
  "peridot-syscall-batching-ctx",
@@ -4140,19 +4138,6 @@ dependencies = [
  "tokio",
  "wasmtime",
  "wasmtime-wasi",
-]
-
-[[package]]
-name = "peridot-clock-ctx"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "log",
- "peridot",
- "wasmtime",
- "wasmtime-wasi",
- "wiggle",
 ]
 
 [[package]]
