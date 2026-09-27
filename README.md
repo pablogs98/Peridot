@@ -4,7 +4,6 @@
 
 Peridot is an I/O-extensible WebAssembly runtime that lets the implementation of individual WASI hostcalls be replaced at run time by plugins, without recompiling or modifying the guest module. This artifact packages the runtime, the Overseer control plane, every context, the guest applications and an object store into a single container image, with one script per paper figure
 and one plotting script per figure.
-
 ---
 
 ## What this artifact contains
