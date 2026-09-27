@@ -3,6 +3,7 @@ name = "peridot-trace-plugin"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+license.workspace = true
 
 # Built as a dynamic library and loaded at run time; it is deliberately NOT a dependency of the
 # peridot binary, which is the whole point — adding it does not rebuild the runtime.

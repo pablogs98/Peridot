@@ -86,22 +86,83 @@ pub struct PeridotS3Ctx {
     s3: aws_sdk_s3::Client,
     s3_descriptors: S3Descriptors,
     futures: Vec<JoinHandle<(Result<PutObjectOutput, SdkError<PutObjectError>>, Duration, Instant)>>,
+    sync: bool,
+}
+
+/// Settings for the `s3` context.
+/// Builds an S3 client, honouring `AWS_S3_FORCE_PATH_STYLE`.
+///
+/// The AWS SDK addresses buckets virtual-hosted-style by default, turning an
+/// endpoint of `http://minio:9000` into `http://<bucket>.minio:9000`. Amazon
+/// S3 resolves that; a self-hosted S3-compatible store (MinIO, Ceph,
+/// SeaweedFS) addressed by hostname does not, and every request fails with a
+/// dispatch error. Setting `AWS_S3_FORCE_PATH_STYLE=true` keeps the bucket in
+/// the path instead. It is off by default, so behaviour against Amazon S3 is
+/// unchanged.
+async fn build_s3_client() -> aws_sdk_s3::Client {
+    let config = aws_config::load_from_env().await;
+    let force_path_style = std::env::var("AWS_S3_FORCE_PATH_STYLE")
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+
+    if force_path_style {
+        let builder = aws_sdk_s3::config::Builder::from(&config).force_path_style(true);
+        aws_sdk_s3::Client::from_conf(builder.build())
+    } else {
+        aws_sdk_s3::Client::new(&config)
+    }
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct S3Settings {
+    /// Await each upload inside `fd_write` instead of spawning it.
+    ///
+    /// The default (`false`) is the asynchronous context the paper calls
+    /// `s3-async-ctx`: the guest's write returns as soon as the bytes are
+    /// queued, so computation and I/O overlap. Setting this to `true` gives
+    /// the `s3-sync-ctx` arm, where the guest blocks until S3 acknowledges,
+    /// which is what makes the async/sync comparison in Table 1 possible.
+    pub sync: bool,
 }
 
 /// Registry entry point. Registered under the name `s3`.
-pub fn factory(next: Box<dyn DelegatingWasiCtx>, _config: ContextConfig<'_>) -> BoxedContextFuture<'_> {
-    Box::pin(async move { Ok(Box::new(PeridotS3Ctx::new(next).await) as Box<dyn DelegatingWasiCtx>) })
+pub fn factory(next: Box<dyn DelegatingWasiCtx>, config: ContextConfig<'_>) -> BoxedContextFuture<'_> {
+    Box::pin(async move {
+        let settings: S3Settings = config.parse()?;
+        Ok(Box::new(PeridotS3Ctx::new(next, settings.sync).await) as Box<dyn DelegatingWasiCtx>)
+    })
 }
 
 impl PeridotS3Ctx {
-    pub async fn new(next: Box<dyn DelegatingWasiCtx>) -> Self {
-        let config = aws_config::load_from_env().await;
-        let client = aws_sdk_s3::Client::new(&config);
+    pub async fn new(next: Box<dyn DelegatingWasiCtx>, sync: bool) -> Self {
+        let client = build_s3_client().await;
         Self {
             next,
             s3: client,
             s3_descriptors: S3Descriptors::new(),
             futures: Vec::new(),
+            sync,
+        }
+    }
+
+    /// Uploads and awaits in place. Used only when `sync` is set; the return
+    /// value is discarded the same way the spawned path discards it, so the
+    /// two arms differ in when they block and in nothing else.
+    async fn put_s3_upload(&mut self, bucket: String, key: String, body: ByteStream) {
+        let start = Instant::now();
+        let result = self
+            .s3
+            .put_object()
+            .bucket(bucket)
+            .key(key)
+            .body(body)
+            .send()
+            .await;
+        if let Err(e) = result {
+            error!("synchronous S3 upload failed: {e}");
+        } else {
+            info!("Upload completed in {:.2?}", start.elapsed());
         }
     }
 
@@ -156,7 +217,11 @@ impl DelegatingWasiCtx for PeridotS3Ctx {
             let body = ByteStream::from(buf);
             let bucket = s3_file.split("//").nth(1).unwrap().split("/").next().unwrap();
             let key = s3_file.split("/").skip(3).collect::<Vec<&str>>().join("/");
-            self.spawn_s3_upload(bucket.to_string(), key.to_string(), body);
+            if self.sync {
+                self.put_s3_upload(bucket.to_string(), key.to_string(), body).await;
+            } else {
+                self.spawn_s3_upload(bucket.to_string(), key.to_string(), body);
+            }
             return Ok(u32::try_from(len)?);
         }
         self.next.fd_write(mem, fd, iovs).await

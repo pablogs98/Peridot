@@ -1,0 +1,14 @@
+# Smoke test: the reference `counter` context over a 64 MiB write.
+# Used by experiments/smoke.sh. Needs no external service.
+args: ["io_writer", "smoke.bin", "64"]
+
+contexts:
+  - counter
+
+io:
+  demand: 150.0
+  max_bandwidth: 300.0
+
+cpu:
+  demand: 75.0
+  utilization: 0.85

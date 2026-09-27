@@ -3,6 +3,7 @@ name = "peridot-cli"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+license.workspace = true
 repository = "https://github.com/pablogs98/Peridot"
 
 [workspace]
@@ -19,6 +20,7 @@ members = [
     "crates/contexts/peridot-syscall-batching-ctx",
     "crates/contexts/peridot-token-ctx",
     "crates/contexts/peridot-counter-ctx",
+    "crates/contexts/tensor_batcher",
     "crates/plugins/peridot-trace-plugin",
 ]
 
@@ -43,6 +45,7 @@ default-members = [
     "crates/contexts/peridot-syscall-batching-ctx",
     "crates/contexts/peridot-token-ctx",
     "crates/contexts/peridot-counter-ctx",
+    "crates/contexts/tensor_batcher",
     "crates/plugins/peridot-trace-plugin",
 ]
 
@@ -50,6 +53,8 @@ default-members = [
 version = "0.1.0"
 authors = ["Pablo Gimeno Sarroca", "Miquel Álvarez Ruiz"]
 edition = "2021"
+# See LICENSE, and THIRD-PARTY-NOTICES.md for material this does not cover.
+license = "Apache-2.0"
 
 [[bin]]
 name = "peridot"

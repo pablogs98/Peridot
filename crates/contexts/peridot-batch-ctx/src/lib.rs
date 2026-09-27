@@ -29,6 +29,29 @@ use uuid::Uuid;
 use wasmtime_wasi::p1::types::{CiovecArray, Error, Fd, Size};
 use wiggle::GuestMemory;
 
+/// Builds an S3 client, honouring `AWS_S3_FORCE_PATH_STYLE`.
+///
+/// The AWS SDK addresses buckets virtual-hosted-style by default, turning an
+/// endpoint of `http://minio:9000` into `http://<bucket>.minio:9000`. Amazon
+/// S3 resolves that; a self-hosted S3-compatible store (MinIO, Ceph,
+/// SeaweedFS) addressed by hostname does not, and every request fails with a
+/// dispatch error. Setting `AWS_S3_FORCE_PATH_STYLE=true` keeps the bucket in
+/// the path instead. It is off by default, so behaviour against Amazon S3 is
+/// unchanged.
+async fn build_s3_client() -> aws_sdk_s3::Client {
+    let config = aws_config::load_from_env().await;
+    let force_path_style = std::env::var("AWS_S3_FORCE_PATH_STYLE")
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+
+    if force_path_style {
+        let builder = aws_sdk_s3::config::Builder::from(&config).force_path_style(true);
+        aws_sdk_s3::Client::from_conf(builder.build())
+    } else {
+        aws_sdk_s3::Client::new(&config)
+    }
+}
+
 /// Settings for the `batch` context.
 #[derive(Debug, Deserialize)]
 pub struct BatchSettings {
@@ -75,8 +98,7 @@ pub struct PeridotBatchCtx {
 
 impl PeridotBatchCtx {
     pub async fn new(next: Box<dyn DelegatingWasiCtx>, batch_size: usize, bucket: &str) -> Self {
-        let config = aws_config::load_from_env().await;
-        let client = aws_sdk_s3::Client::new(&config);
+        let client = build_s3_client().await;
         Self {
             next,
             batch_size,

@@ -1,0 +1,23 @@
+\usepackage{fvextra}
+\usepackage{booktabs}
+\usepackage{etoolbox}
+\usepackage{xcolor}
+
+% Long commands and URLs in code blocks wrap instead of running off the page.
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,breakanywhere,commandchars=\\\{\}}
+
+% Tables carry file paths and identifiers. Give them a size down so they fit.
+% Deliberately NOT hyphenating monospace: a hyphen inserted into a path or a
+% CSV header reads as part of the text.
+\AtBeginEnvironment{longtable}{\footnotesize}
+\AtBeginEnvironment{quote}{\small}
+
+% Permit a break after the punctuation that appears inside those runs, so
+% `arm,rep,op,...` and `a/long/path.sh` wrap at a sensible point.
+\makeatletter
+\newcommand{\breakablett}[1]{{\ttfamily\def\do##1{\discretionary{}{}{}\char`##1\relax}%
+  \@tfor\next:=#1\do{\ifx\next,\do,\else\ifx\next_\do_\else\ifx\next/\do/\else\next\fi\fi\fi}}}
+\makeatother
+
+\setlength{\emergencystretch}{3em}
+\definecolor{linkblue}{HTML}{1F4E79}

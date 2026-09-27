@@ -19,9 +19,21 @@ use tonic::transport::Server;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// TCP port to listen on localhost
+    /// TCP port to listen on
     #[arg(required = true)]
     port: u16,
+
+    /// Address to bind to.
+    ///
+    /// Defaults to loopback, which is right when the modules share a host
+    /// with the Overseer. Modules on other hosts -- the two-node arrangement
+    /// the paper's scalability experiment uses, or a containerised deployment
+    /// where the shim runs the Overseer elsewhere -- cannot reach a loopback
+    /// socket, so pass `--bind 0.0.0.0` there. There is no authentication on
+    /// this interface, so bind it to a reachable address only on a network
+    /// you trust.
+    #[arg(short, long, default_value = "127.0.0.1")]
+    bind: String,
 
     /// Max I/O bandwidth (B/s)
     #[arg(required = true)]
@@ -45,7 +57,9 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
     }
     env_logger::init();
 
-    let addr = format!("127.0.0.1:{}", args.port).parse()?;
+    let addr: std::net::SocketAddr = format!("{}:{}", args.bind, args.port)
+        .parse()
+        .map_err(|e| format!("invalid bind address '{}:{}': {e}", args.bind, args.port))?;
     let max_bandwidth = args.max_bandwidth;
     let update_interval = args.update_interval;
 

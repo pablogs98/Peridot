@@ -1,0 +1,23 @@
+# Table 1, s3-async-ctx arm.
+#
+# The `s3` context intercepts path_open/fd_write/fd_close on s3:// paths and
+# spawns each upload without awaiting it, so the guest's write returns as soon
+# as the bytes are queued and computation overlaps with I/O. Pending uploads
+# are drained during shutdown, so the runtime does not exit early.
+#
+# Credentials come from the environment (AWS_ACCESS_KEY_ID,
+# AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL).
+args: ["imagenet-preprocessing", "false", "256", "s3://peridot-ae/tensors/async"]
+
+contexts:
+  - name: s3
+    config:
+      sync: false
+
+io:
+  demand: 150.0
+  max_bandwidth: 300.0
+
+cpu:
+  demand: 75.0
+  utilization: 0.85

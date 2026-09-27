@@ -93,28 +93,29 @@ impl MetricsPublisher {
                         }
 
                         // gather metrics without holding the lock across .await
-                        println!("Overseer gathering metrics from producers.");
                         let gathered_metrics = {
                             let prods = producers.read().unwrap();
                             let mut metrics = HashMap::new();
                             for producer in prods.iter() {
                                 producer.produce(&mut metrics);
-                                println!("Overseer gathered metrics: {:?}", &metrics);
                             }
                             metrics
                         }; // <-- lock released here
+                        // `debug`, not `println!`: this runs once per interval
+                        // and the guest owns stdout.
+                        log::debug!("collected metrics {gathered_metrics:?}");
 
                         let received_metrics =
                             client.update_metrics(&module_id, gathered_metrics).await;
 
                         if !received_metrics.is_empty() {
+                            log::debug!(
+                                "overseer returned {received_metrics:?}; updating {} subscriber(s)",
+                                subscribers.read().unwrap().len()
+                            );
                             let subs = subscribers.read().unwrap();
                             for subscriber in subs.iter() {
                                 let mut s = subscriber.lock().unwrap();
-                                warn!(
-                                    "Overseer updating subscriber with metrics: {:?}",
-                                    &received_metrics
-                                );
                                 s.update(&received_metrics);
                             }
                         } else {
@@ -127,7 +128,12 @@ impl MetricsPublisher {
                         tokio::time::sleep(time::Duration::from_secs(1)).await;
                     }
 
-                    client.remove_module(&module_id).await.unwrap();
+                    // Best-effort: the module is on its way out either way, and
+                    // an overseer that has already gone is not a reason to
+                    // panic the runtime on the way down.
+                    if let Err(status) = client.remove_module(&module_id).await {
+                        warn!("could not deregister module {module_id} from the overseer: {status}");
+                    }
                 });
 
                 self.thread_handle = Some(handle);

@@ -3,12 +3,17 @@ name = "containerd-shim-peridot"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [patch.crates-io]
 oci-spec = "0.8.3"
 
 [dependencies.containerd-shim-wasm]
+# Pinned by revision, not by branch. An artifact has to keep building years after
+# publication, and a bare `git =` follows the fork's default branch wherever it moves.
+# This rev is the one Cargo.lock already resolves to.
 git = "https://github.com/miqalvarez/runwasi"
+rev = "8df45f8bb3c0cd485981e2d60b7c8301682fff3f"
 
 [dependencies]
 wasmtime = { workspace = true }

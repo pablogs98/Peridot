@@ -3,6 +3,7 @@ name = "peridot"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 wiggle = { workspace = true }

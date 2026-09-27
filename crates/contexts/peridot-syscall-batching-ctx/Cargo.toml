@@ -3,6 +3,7 @@ name = "peridot-syscall-batching-ctx"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 peridot = { workspace = true }

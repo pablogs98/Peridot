@@ -3,6 +3,7 @@ name = "peridot-geds-ctx"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+license.workspace = true
 
 # Built as a dynamic library and loaded at run time, so a runtime without IBM GEDS installed
 # neither builds nor links it. Build this package explicitly on a machine that has GEDS:

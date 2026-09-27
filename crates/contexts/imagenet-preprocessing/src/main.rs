@@ -1,25 +1,32 @@
 use std::env::args;
-use std::{fs, thread};
-use std::fs::{File, OpenOptions};
-use std::io::Write;
 use std::path::PathBuf;
-use log::info;
-use std::ffi::CString;
-use std::os::fd::RawFd;
 use std::time::Duration;
-use libc::{open, O_CREAT, O_RDWR, O_TRUNC, S_IRUSR, S_IWUSR};
+use std::{fs, thread};
+
+use log::info;
 
 fn main() {
     // get time
-    let args = args().collect::<Vec<String>>();
-    if args.len() != 2 {
-        println!("Usage: imagenet-preprocessing <use_geds:true|false> <num_images>");
-        info!("Usage: imagenet-preprocessing <use_geds:true|false> <num_images>");
+    // argv[0] is the program name, as everywhere else. The guest modules
+    // written in C read their first argument from argv[1]; this one used to
+    // read it from argv[0], so the two kinds of guest needed different `args`
+    // conventions in a Peridot configuration file. They no longer do.
+    let args = args().skip(1).collect::<Vec<String>>();
+    if args.len() < 2 {
+        println!("Usage: imagenet-preprocessing <remote:true|false> <num_images> [output_prefix]");
+        info!("Usage: imagenet-preprocessing <remote:true|false> <num_images> [output_prefix]");
         return;
     }
     println!("Starting imagenet-preprocessing");
     let use_geds = args[0].parse::<bool>().unwrap();
     let num_images = args[1].parse::<usize>().unwrap();
+    // Where the processed tensors are written. The third argument makes the
+    // destination configurable so the artifact can point at whatever bucket
+    // the reviewer's object store exposes; without it the original
+    // hardcoded paths are used.
+    let prefix = args.get(2).cloned().unwrap_or_else(|| {
+        if use_geds { "s3://pgimeno-data/tensors".to_string() } else { "./tensors/tensors".to_string() }
+    });
 
     let mut image_paths = vec![];
     for image in fs::read_dir("./resources").unwrap() {
@@ -42,7 +49,7 @@ fn main() {
     let elapsed = start.elapsed();
     println!("Read images in {} ms", elapsed.as_millis());
     let start = std::time::Instant::now();
-    preprocess(&images, use_geds);
+    preprocess(&images, &prefix);
     let elapsed = start.elapsed();
     println!("Preprocessed images in {} ms", elapsed.as_millis());
 }
@@ -78,7 +85,7 @@ fn read_images(image_paths: &[PathBuf], num_images: usize) -> Result<Vec<Vec<u8>
     Ok(images)
 }
 
-fn preprocess(images: &[Vec<u8>], use_geds: bool) -> Vec<Vec<u8>> {
+fn preprocess(images: &[Vec<u8>], prefix: &str) -> Vec<Vec<u8>> {
     let mut processed_images = Vec::new();
     let mut i = 0;
     for image in images {
@@ -89,11 +96,7 @@ fn preprocess(images: &[Vec<u8>], use_geds: bool) -> Vec<Vec<u8>> {
             &[0.485, 0.456, 0.406],
             &[0.229, 0.224, 0.225],
         );
-        let file_name = if use_geds {
-            format!("s3://pgimeno-data/tensors/tensor_{}.bin", i)
-        } else {
-            format!("./tensors/tensors/tensor_{}.bin", i)
-        };
+        let file_name = format!("{}/tensor_{}.bin", prefix.trim_end_matches('/'), i);
 
         write_tensor_to_file(&file_name, &processed_image).unwrap();
 

@@ -72,9 +72,13 @@ int main(int argc, char *argv[]) {
         // Sleep for a random time between 0.2 and 0.5 seconds
         usleep(200000 + rand() % 580000);
 
-        free(buffer);
+        // `buffer` is allocated once, before the loop, and is reused by every
+        // iteration; freeing it here made the second iteration write through a
+        // dangling pointer and free it a second time.
         free(read_buffer);
         close(file);
     }
+
+    free(buffer);
     return 0;
 }

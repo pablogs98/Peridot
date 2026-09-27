@@ -20,3 +20,19 @@ Makefile
 # Editors and OS
 .idea/
 .DS_Store
+
+# Artifact output. The scripts regenerate these; only the authors' reference
+# CSVs are tracked, because `plot_all.py --reference` needs them.
+artifact/results/*.csv
+artifact/results/*.log
+artifact/figures/
+
+# tensor_batcher intermediates, in case one escapes its scratch directory.
+*.parquet
+__pycache__/
+
+# Guest build output. The .wasm modules the artifact ships are in
+# artifact/guests/ and are produced by artifact/bin/build-guests.sh.
+c-wasm/*.wasm
+c-wasm/**/*.wasm
+c-wasm/write_1g/write

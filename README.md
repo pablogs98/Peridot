@@ -1,461 +1,389 @@
 # Peridot: An I/O-Extensible Execution Environment for WebAssembly Containers
 
-![Rust workflow](https://github.com/pablogs98/peridot/actions/workflows/rust.yml/badge.svg)
+**Artifact for ACM Middleware '26.**
 
-Peridot runs a WebAssembly module under WASI preview 1 and lets you replace the implementation of
-individual hostcalls with a **context**, a link in a chain that sits between the guest and the
-real WASI implementation. A context can count bytes, rate-limit I/O, redirect `path_open` to
-object storage, batch small writes, or anything else expressible at the hostcall boundary, without
-the guest module being recompiled or even aware.
-
-Which contexts run is decided **at run time**, in the configuration file. There are no cargo
-feature flags.
+Peridot is an I/O-extensible WebAssembly runtime that lets the implementation of individual WASI hostcalls be replaced at run time by plugins, without recompiling or modifying the guest module. This artifact packages the runtime, the Overseer control plane, every context, the guest applications and an object store into a single container image, with one script per paper figure
+and one plotting script per figure.
 
 ---
 
-## Requirements
+## What this artifact contains
 
-| Requirement | Why |
+| | |
 |---|---|
-| A recent stable Rust toolchain | The workspace tracks wasmtime 38, which sets a fairly recent floor. `rustup update` is the safe move. |
-| `protoc` | `peridot-overseer-grpc` compiles its protobufs at build time. |
-| A C toolchain and `cmake` | `aws-lc-sys`, pulled in by the AWS SDK that the `s3` and `batch` contexts use. |
-| [wasi-sdk](https://github.com/WebAssembly/wasi-sdk) *(optional)* | Only to build the C guest modules under `c-wasm/`. Any `wasm32-wasip1` binary works. |
+| **Source** | The runtime, the Overseer, every context, the containerd shim, and the ImageNet workload. |
+| **Build** | `artifact/Dockerfile` and `artifact/docker-compose.yml`, which also starts an S3-compatible object store. |
+| **Guests** | Precompiled `wasm32-wasip1` modules in `artifact/guests/`; `artifact/bin/build-guests.sh` rebuilds them. |
+| **Experiments** | One script per figure in `artifact/experiments/`, each writing a CSV to `artifact/results/`. |
+| **Analysis** | One matplotlib script per figure in `artifact/plots/`, writing PDF and PNG to `artifact/figures/`. |
+---
 
-Install them with:
+## Badges claimed
 
-```bash
-sudo apt install protobuf-compiler build-essential cmake pkg-config
-```
+**Artifacts Available**, **Artifacts Functional**, and **Results Reproduced**.
 
-Peridot is developed and tested on Ubuntu.
+Results Reproduced covers Figures 3, 5, 6 and 7, and the two rows of Table 1
+that need neither a native IBM GEDS installation nor a FUSE mount. Figure 4 is
+not reproduced. See [What this artifact does and does not
+reproduce](#what-this-artifact-does-and-does-not-reproduce).
 
-Two workspace members are **not** part of the default build: `peridot-geds-ctx`, which does not
-compile until you have IBM GEDS installed (see [GEDS](#geds)), and `containerd-shim-peridot`,
-which you only need for the deployment described in
-[Deploying with containerd](#deploying-with-containerd). Both are still full workspace members,
-so build either explicitly with `-p`.
+### Availability
+
+Source repository: <https://github.com/pablogs98/Peridot>
+
+Licence: [Apache License 2.0](LICENSE). Third-party material that this licence
+does not cover is listed in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+> **Before submission, fill in the line below and delete this note.**
+> The Artifacts Available badge asks for a public, archival location. A GitHub
+> URL alone is not archival, because history can be rewritten or the
+> repository removed; mint a Zenodo DOI from the tagged release and cite it
+> here.
+>
+> - Archived release (DOI): `TODO`
 
 ---
 
-## Build
+## System requirements
 
-```bash
-cargo build --release
-```
+Docker and Docker Compose. Four cores, 8 GiB of RAM and about 10 GB of free
+disk. On Docker Desktop the disk counts against the VM's limit, not the
+host's. For timings comparable to the paper, use an x86-64 Linux host.
 
-That produces `target/release/peridot`. Every built-in context is compiled in; none of them is
-selected until a configuration file names it.
-
-To build one of the two non-default members, name it:
-
-```bash
-cargo build --release -p containerd-shim-peridot
-```
+The paper's numbers were measured on AWS EC2 running Ubuntu 22.04: an
+`m7i.2xlarge` (8 vCPU, 32 GiB) for §4.1, and a `t3.xlarge` (4 vCPU, 16 GiB,
+5 Gbps) with Amazon S3 for §4.2 and §4.3. This artifact uses a local MinIO
+container instead, at reduced scale.
 
 ---
 
-## Quick start: running a module with the `counter` context
+## Getting Started Guide
 
-`counter` is the reference context. It intercepts `fd_write` and `fd_pwrite`, adds up the bytes
-the guest writes, and publishes the running total as a `written_bytes` metric. It needs no
-external services, which makes it a good first run.
+About 10 minutes, most of it download. Confirms the artifact builds, runs and
+produces figures. No experiment is run to completion; that is
+[Step-by-Step Instructions](#step-by-step-instructions).
 
-### 1. Get a WebAssembly module
-
-Any `wasm32-wasip1` binary will do. To build one of the C examples in this repository:
+### 1. Build the image and start the object store
 
 ```bash
-$WASI_SDK_PATH/bin/clang --target=wasm32-wasip1 \
-    c-wasm/helloworld/main.c -o hello.wasm
+cd <repository root>
+docker compose -f artifact/docker-compose.yml up -d
 ```
 
-On wasi-sdk releases older than 24, the target triple is spelled `wasm32-wasi`.
+Builds the runtime, the Overseer, every context, the plugin and the external
+batcher from source, and starts MinIO with the bucket created.
 
-The `c-wasm/` tree also carries CMake projects, buildable with the wasi-sdk toolchain file:
+### 2. Confirm the runtime and a context chain work
 
 ```bash
-cmake -S c-wasm -B c-wasm/build \
-    -DCMAKE_TOOLCHAIN_FILE=$WASI_SDK_PATH/share/cmake/wasi-sdk.cmake
-cmake --build c-wasm/build
+docker compose -f artifact/docker-compose.yml run --rm peridot experiments/smoke.sh
 ```
 
-A Rust guest works just as well. Run `rustup target add wasm32-wasip1`, then
-`cargo build --target wasm32-wasip1`.
-
-### 2. Write a configuration file
-
-```yaml
-# config.yaml
-args: []
-
-contexts:
-  - counter
-
-io:
-  demand: 150.0
-  max_bandwidth: 300.0
-
-cpu:
-  demand: 75.0
-  utilization: 0.85
-```
-
-### 3. Run it
-
-```bash
-./target/release/peridot hello.wasm config.yaml --log-level debug
-```
-
-The module path comes first, the configuration file second. At `debug` you will see the context
-report each intercepted write, and the running total when the chain is torn down:
+Expected output ends with:
 
 ```
 [INFO  peridot] Context chain: ["counter"]
-[DEBUG peridot_counter_ctx] fd_write wrote 14 bytes, total 14
-[INFO  peridot_counter_ctx] Total bytes written: 14
+[INFO  peridot_counter_ctx] Total bytes written: 67108982
+==> PASS - counter intercepted the write path, 67108982 bytes counted
 ```
 
-Peridot preopens the **module's own directory** for the guest as `.`, so a module that opens
-`data.txt` gets the file sitting next to the `.wasm`.
+The last digits vary: the total is the guest's 64 MiB payload plus its own
+progress lines.
+
+### 3. Confirm the analysis path works
+
+```bash
+docker compose -f artifact/docker-compose.yml run --rm peridot \
+    python3 plots/plot_all.py --reference
+```
+
+Regenerates all four figures from the sample CSVs in `results/reference/`,
+writing PDF and PNG into `artifact/figures/` on the host. They correspond to
+Figures 3, 5, 6 and 7 of the paper, and each script prints the relevant ratios
+to stdout.
 
 ---
 
-## Command line
+## Step-by-Step Instructions
 
-```
-peridot <MODULE_PATH> <CONFIG_PATH> [OPTIONS]
+Run these from `/artifact` inside the container:
+
+```bash
+docker compose -f artifact/docker-compose.yml exec peridot bash
 ```
 
-| Argument | Required | Description |
+| Claim | Script (in `experiments/`) | Runtime |
 |---|---|---|
-| `<MODULE_PATH>` | ✔️ | The WebAssembly module to run |
-| `<CONFIG_PATH>` | ✔️ | The YAML configuration file |
-| `--log-level, -l` | ✖️ | Log verbosity, default `info`. Ignored if `RUST_LOG` is set. |
+| [§3.2, Fig. 3](#figure-3-interposition-overhead-32): interposition costs essentially nothing | `exp_overhead.sh` | ~2 min |
+| [§4.1, Fig. 5](#figure-5-dynamic-io-provisioning-41): bandwidth tracks declared demand | `exp_io.sh` | ~6 min |
+| [§4.2, Tab. 1](#table-1-asynchronous-versus-synchronous-offload-42): async offload beats sync offload | `exp_storage.sh` | ~2 min |
+| [§4.2, Fig. 6](#figure-6-in-runtime-parquet-batching-42): in-runtime batching beats an external batcher | `exp_storage.sh` | ~8 min |
+| [§4.3, Fig. 7](#figure-7-wasi-hostcall-batching-43): hostcall batching raises write IOPS | `exp_hostcall_batching.sh` | ~2 min |
 
-Contexts are configured in the YAML file.
+[CLAIMS.txt](artifact/CLAIMS.txt) restates each claim in the paper's own
+words, including the functional ones no single command covers.
 
----
+### Running everything at once
 
-## Configuration
-
-```yaml
-# Optional. Without it, no metrics thread is started.
-overseer_address: "http://127.0.0.1:50051"
-
-# Arguments passed through to the guest as argv.
-args:
-  - "foo"
-  - "bar"
-
-# Optional. Plugin libraries to load before the chain is built.
-plugins:
-  - ./target/release/libperidot_trace_plugin.so
-
-# Optional. The context chain, outermost first.
-# Absent or empty means plain WASI with no interception at all.
-contexts:
-  - counter
-  - name: token
-    config:
-      max_bandwidth: 200
-
-# Required.
-io:
-  demand: 150.0
-  max_bandwidth: 300.0
-
-cpu:
-  demand: 75.0
-  utilization: 0.85
+```bash
+docker compose -f artifact/docker-compose.yml run --rm peridot \
+    experiments/run_all.sh
 ```
 
-`args`, `io` and `cpu` are required; `overseer_address`, `plugins` and `contexts` may be omitted.
+About 15 minutes at reduced scale. Runs every experiment, regenerates every
+figure, and prints a summary of what ran and what was skipped. CSVs land in
+`artifact/results/` and figures in `artifact/figures/` on the host.
 
-Each entry in `contexts` is either a bare name or a `name` with its own `config` block. Contexts
-that take no settings can always be written as a bare name.
+### Scale
+
+Experiments run a reduced configuration by default. `PERIDOT_AE_FULL=1`
+switches to the paper's parameters, which need the paper's hardware and run
+for hours:
+
+```bash
+docker compose -f artifact/docker-compose.yml run --rm \
+    -e PERIDOT_AE_FULL=1 peridot experiments/run_all.sh
+```
+
+The reduced configuration lowers volumes, iteration counts and repetitions.
+Each script states both parameters at the top.
 
 ---
 
-## Contexts
+### Figure 3: interposition overhead (§3.2)
 
-A context chain composes like middleware. With `contexts: [counter, token]`, `counter` is
-outermost: it sees each hostcall first and passes it to `token`, which passes it to the real WASI
-implementation. Results travel back out in reverse. A context overrides only the hostcalls it
-cares about; the other forty-odd forward automatically.
+```bash
+experiments/exp_overhead.sh          # ~2 min
+python3 plots/plot_overhead.py
+```
 
-| Name | Replaces | Settings |
+Times `fd_write`, `fd_pwrite`, `fd_read` and `fd_pread` at 1 KiB inside the
+guest, with an empty context chain and with `syscall-batching` at
+`num_writes: 1`, which disables batching and leaves only interposition.
+
+**Expected.** Bars of equal height within the error bars; the printed
+percentages straddle zero. Observed -0.8% to +6.9%.
+
+### Figure 5: dynamic I/O provisioning (§4.1)
+
+```bash
+experiments/exp_io.sh                # ~6 min
+python3 plots/plot_io.py
+```
+
+Four collocated modules write concurrently under a global 1 Gbps policy with
+demands of 100/200/300/400 Mbps, once without the Overseer (each pinned to an
+equal quarter) and once with it.
+
+**Expected.** Upper subplot: the four lines overlap regardless of demand.
+Lower subplot: they separate in proportion to it. Observed 224/225/229/227
+Mbps against 74/174/280/378 Mbps.
+
+At the paper's demands the total (100+200+300+400) equals the policy exactly,
+so max-min fair share grants each module its demand and a module that finishes
+frees capacity no other module is asking for. The allocation is therefore flat
+and demand-proportional rather than stepping up over time. Oversubscribing the
+policy shows the reallocation:
+
+```bash
+IO_DEMANDS_MBPS="100 900 900 900" experiments/exp_io.sh
+```
+
+Each module is then clamped below its demand, and the clamps loosen as modules
+finish. The policy is unit-tested in
+`crates/peridot-overseer/src/policy.rs` (`cargo test -p peridot-overseer`).
+
+### Table 1: asynchronous versus synchronous offload (§4.2)
+
+```bash
+experiments/exp_storage.sh           # ~2 min for this part
+python3 plots/plot_batch.py
+```
+
+Runs the ImageNet guest, which only opens, writes and closes ordinary files,
+with the `s3` context in asynchronous mode (uploads spawned) and in
+synchronous mode (`sync: true`, each upload awaited inside `fd_write`).
+
+**Expected.** `s3-async-ctx` ahead of `s3-sync-ctx`. Observed 107 vs 49 MB/s,
+a factor of 2.2 against the paper's 5.1x on Amazon S3; `artifact/env.example`
+shows how to point at a remote store. The `s3fs` and `geds-ctx` rows are not
+run, see [Not reproduced](#not-reproduced-and-why).
+
+### Figure 6: in-runtime Parquet batching (§4.2)
+
+```bash
+experiments/exp_storage.sh           # ~8 min for this part
+python3 plots/plot_batch.py
+```
+
+The same guest at batch sizes 2 to 128. The Peridot arm uses the `batch`
+context, which groups files and uploads each group as one Parquet object from
+inside the runtime; the Wasmtime arm runs with no context and a separate
+`tensor_batcher` process. Both arms are timed until every batch is durably in
+the object store, since the external batcher keeps working after the guest
+exits.
+
+**Expected.** Peridot ahead at every batch size, largest margin at the
+smallest. Observed 2.05x at batch 2 and 1.37x at batch 128, against the
+paper's 1.15x at the smallest batch.
+
+### Figure 7: WASI hostcall batching (§4.3)
+
+```bash
+experiments/exp_hostcall_batching.sh # ~2 min
+python3 plots/plot_hostcall_batching.py
+```
+
+Sequential writes of 64 B, 256 B, 1 KiB and 4 KiB while the
+`syscall-batching` context buffers `num_writes` of them and flushes each group
+as one host write, sweeping `num_writes` from 1 (batching off) to 1024.
+
+**Expected.** IOPS rise with batch size, most at 64 B, least at 4 KiB,
+flattening past 128. The multiplier scales with the cost of a host `write`,
+so it is far larger inside a VM than the paper's 4.90x on EC2.
+
+---
+
+## Interpreting the output
+
+Every experiment produces three things.
+
+**1. A CSV in `results/`,** one row per measurement; aggregation happens in
+the plot script.
+
+```
+overhead.csv             arm,rep,op,bytes,iterations,
+                         mean_us,p50_us,p99_us,stddev_us
+io.csv                   arm,module,demand_mbps,t_seconds,written_bytes
+storage_table1.csv       setup,rep,images,seconds,throughput_mbs
+batch.csv                arm,batch_size,rep,images,seconds,throughput_mbs
+hostcall_batching.csv    io_size,batch_size,writes_per_run,runs,
+                         mean_kiops,stddev_kiops
+```
+
+`io.csv` records cumulative bytes; the plot script differentiates them into a
+bandwidth series. The `arm` or `setup` column separates the baseline from
+Peridot and is the comparison each figure makes.
+
+**2. A figure in `figures/`,** as both PDF and PNG.
+
+**3. The numbers the claim rests on, printed to stdout.** For example
+`plots/plot_hostcall_batching.py` prints:
+
+```
+speedup over no batching (num_writes = 1):
+     64 B: baseline      16.0 K -> best    8236.5 K at num_writes=1024  (513.53x)
+```
+
+and `plots/plot_batch.py` prints Table 1 in the paper's layout. Compare the
+ordering and trend against the paper rather than the magnitudes.
+`plots/plot_all.py` reports which figures it skipped and why.
+
+---
+
+## What this artifact does and does not reproduce
+
+### Reproduced
+
+- **Figure 3**, interposition overhead.
+- **Figure 5**, dynamic I/O provisioning, including the Overseer's max-min
+  fair share loop: modules register a demand, the Overseer computes
+  `token_rate`, and each module's token bucket applies it. Modules deregister
+  on exit and the policy recomputes.
+- **Figure 6**, in-runtime Parquet batching.
+- **Figure 7**, hostcall batching.
+- **Table 1**, the `s3-sync-ctx` and `s3-async-ctx` rows.
+
+Details, including expected output, are under
+[Step-by-Step Instructions](#step-by-step-instructions).
+
+### Not reproduced
+
+- **`geds-ctx` (Table 1)** needs a native IBM GEDS installation. Source is in
+  `crates/contexts/peridot-geds-ctx/`; [docs/peridot.md](docs/peridot.md)
+  documents the build.
+- **`s3fs` (Table 1)** needs FUSE and a privileged container. It is the row
+  the paper normalises to, so `plots/plot_batch.py` normalises to the slowest
+  arm present.
+- **Figure 4**, Overseer scalability, needs two nodes of a specific size, and
+  the `UpdateMetrics` RPC carries no timestamp, so there is no latency
+  instrumentation to read.
+
+---
+
+## Layout
+
+```
+artifact/
+  Dockerfile            multi-stage build, invoked by docker compose
+  docker-compose.yml    Peridot + MinIO
+  env.example           copy to .env to override credentials or endpoint
+  guests/               prebuilt .wasm modules
+  configs/              example Peridot configuration files
+  experiments/          one script per figure, each writing a CSV
+  plots/                one matplotlib script per figure
+  results/              CSVs, mounted from the host
+  results/reference/    sample data, for --reference
+  figures/              generated PDFs and PNGs, mounted from the host
+  bin/                  guest and PDF build scripts
+```
+
+### Guest modules
+
+| Module | Source | Used by |
 |---|---|---|
-| `counter` | `fd_write`, `fd_pwrite`: counts bytes written | None |
-| `token` | `fd_read`/`fd_write`/`fd_pread`/`fd_pwrite`: rate limiting | `max_bandwidth` (defaults to `io.max_bandwidth`) |
-| `clock` | `clock_time_get` and the I/O calls: latency tracing | None |
-| `s3` | `path_open`/`fd_write`/`fd_close` on `s3://` paths | credentials from the environment |
-| `geds` | the same, on `geds://` paths | see [GEDS](#geds) below |
-| `batch` | `fd_write`: accumulates files, uploads them as one parquet object | `batch_size`, `bucket` (required) |
-| `syscall-batching` | `path_open` and the write path: coalesces small writes | `num_writes` (default `1`, which disables batching) |
+| `hostcall_latency.wasm` | `c-wasm/hostcall_latency` | Figure 3 |
+| `io_writer.wasm` | `c-wasm/io_writer` | Figure 5, smoke test |
+| `iops.wasm` | `c-wasm/iops` | Figure 7 |
+| `imagenet-preprocessing.wasm` | `crates/contexts/imagenet-preprocessing` | Table 1, Figure 6 |
+| `read_write.wasm`, `helloworld.wasm` | `c-wasm/` | ad-hoc use |
 
-All of these except `geds` are built into the binary. `geds` ships as a plugin, because it cannot
-be built without a native IBM GEDS installation.
-
-Metrics a context publishes (`counter`'s `written_bytes`, for instance) are collected at startup
-and reported to the overseer. With no `overseer_address` configured, no metrics thread runs and
-contexts fall back to logging.
+`bin/build-guests.sh` rebuilds them from source. It needs wasi-sdk and is not
+required to run the experiments.
 
 ---
 
-## GEDS
+## Running without Docker
 
-[IBM GEDS](https://github.com/IBM/GEDS) is a distributed ephemeral data store. The `geds` context
-redirects guest file operations on `geds://` paths to it, encrypting object contents with AES-256-GCM
-on the way out.
+**Linux only.** The Overseer's metrics producer reads `/proc/<pid>/io`, so on
+a host without `/proc` its thread dies on the first tick and each module keeps
+the rate from its own configuration file. The Figure 5 plot then does not
+demonstrate the Overseer. Other experiments are unaffected.
 
-It is set up differently from every other context: GEDS is a native library that must be present on
-the machine, so `peridot-geds-ctx` is **not** compiled into the binary and is **not** a member of
-the default build. It is loaded at run time as a plugin instead. A machine without GEDS therefore
-neither builds nor links it.
-
-### 1. Install GEDS
-
-Follow the upstream build instructions at <https://github.com/IBM/GEDS>. Install it to a prefix
-whose Rust bindings land where the manifest expects them. With the default prefix `/usr/local`,
-that is `/usr/local/rust`.
-
-### 2. Enable the dependency
-
-`crates/contexts/peridot-geds-ctx/Cargo.toml` ships with the binding commented out so the crate
-stays buildable on machines without GEDS. Uncomment it, and correct the path if you installed
-somewhere other than `/usr/local`:
-
-```toml
-geds_rs = { path = "/usr/local/rust" }
-```
-
-### 3. Build the plugin
+Needs the dependencies in [docs/peridot.md](docs/peridot.md) (`protoc`,
+`cmake`, a C toolchain):
 
 ```bash
-cargo build --release -p peridot-cli -p peridot-geds-ctx
+cargo build --release --locked -p peridot-cli -p peridot-overseer \
+    -p tensor_batcher -p peridot-trace-plugin
+pip install -r artifact/plots/requirements.txt boto3
+
+cd artifact
+experiments/smoke.sh
+S3_ENDPOINT=http://127.0.0.1:9000 AWS_ACCESS_KEY_ID=... \
+    AWS_SECRET_ACCESS_KEY=... experiments/run_all.sh
 ```
 
-> Build the plugin **and** the runtime in one Cargo invocation. Contexts cross the library
-> boundary as ordinary Rust types, which have no stable ABI, so both sides must link one identical
-> build of `peridot`. See [Plugins](#plugins-adding-a-context-without-rebuilding-peridot) for what
-> happens if they do not.
-
-This produces `target/release/libperidot_geds_ctx.so`.
-
-### 4. Set the environment
-
-The context reads its S3 backing-store credentials from the environment and panics if they are
-missing:
-
-| Variable | Required | Meaning |
-|---|---|---|
-| `S3_ENDPOINT` | ✔️ | Endpoint of the object store GEDS caches from |
-| `S3_ACCESS_KEY` | ✔️ | Access key for that store |
-| `S3_SECRET_KEY` | ✔️ | Secret key for that store |
-| `GEDS_CIPHER_KEY` | ✖️ | Hex-encoded 32-byte AES-256 key |
-
-> **Set `GEDS_CIPHER_KEY` if you intend to read the data back.** When it is unset the context
-> generates a fresh random key at startup, so objects written by one run cannot be decrypted by
-> the next. Generate one with `openssl rand -hex 32`.
-
-### 5. Point the configuration at it
-
-```yaml
-args: []
-
-plugins:
-  - ./target/release/libperidot_geds_ctx.so
-
-contexts:
-  - geds
-
-io:
-  demand: 150.0
-  max_bandwidth: 300.0
-
-cpu:
-  demand: 75.0
-  utilization: 0.85
-```
-
-The guest then addresses objects as `geds://<bucket>/<key>`. An ordinary `open`, `write`, `read`
-or `unlink` on such a path is serviced by GEDS instead of the filesystem. Paths that do not start
-with `geds://` fall through to the next context untouched, so a module can mix both freely.
-
-If GEDS fails to start, the context logs the error and falls back to the local filesystem.
+Build the runtime and any plugin **in one cargo invocation**, as above.
+Contexts cross the plugin boundary as ordinary Rust types with no stable ABI,
+and Cargo resolves features per invocation, so separate builds can disagree
+and the plugin will fail to load.
 
 ---
 
-## Plugins: adding a context without rebuilding Peridot
+## The containerd shim
 
-A context can live outside the runtime, as a `cdylib` loaded at startup. Point `plugins:` at the
-library and its contexts become usable in `contexts:`:
-
-```yaml
-plugins:
-  - ./target/release/libperidot_trace_plugin.so
-contexts:
-  - name: trace
-    config: { prefix: "T" }
-```
-
-To write one, add `crate-type = ["cdylib"]` to the plugin crate, implement the context as usual,
-and declare the entry points:
-
-```rust
-peridot::export_peridot_plugin! {
-    "trace" => crate::factory,
-}
-```
-
-`crates/plugins/peridot-trace-plugin` is a complete working example. It is deliberately not a
-dependency of the `peridot` binary, which is the point.
-
-> **Build the plugin and the runtime in the same Cargo invocation:**
->
-> ```bash
-> cargo build --release -p peridot-cli -p peridot-trace-plugin
-> ```
->
-> Contexts cross the boundary as ordinary Rust types (`Box<dyn DelegatingWasiCtx>`, boxed
-> futures), which have no stable ABI, so both sides must link one *identical* build of `peridot`.
-> Cargo resolves features per invocation, so building them separately can silently produce two
-> different builds of `peridot` even from the same workspace and lockfile.
->
-> Peridot checks two things before calling into a library and refuses to load on either mismatch:
-> a version fingerprint (Peridot version, rustc version, target triple), and a type probe derived
-> from `TypeId`, which additionally catches differing dependency versions, features, or a
-> separately compiled `peridot`, none of which the version string can see.
-
----
-
-## Deploying with containerd
-
-Peridot ships a containerd shim, so a Wasm workload can run as an ordinary container under `ctr`,
-`nerdctl` or Kubernetes and still get its context chain.
-
-The shim is built on [runwasi](https://github.com/containerd/runwasi), the containerd project's
-framework for Wasm shims, and follows its Wasmtime shim closely. It currently tracks a fork,
-<https://github.com/miqalvarez/runwasi>, pinned in `crates/containerd-shim-peridot/Cargo.toml`.
-runwasi handles the containerd plumbing: sandbox lifecycle, image pulling, layer handling and
-compilation caching. Peridot supplies the `Sandbox` implementation that assembles the context
-chain around the guest.
-
-`crates/containerd-shim-peridot/README.md` has the full walkthrough. What follows is the short
-version.
-
-### 1. Build and install the shim
-
-```bash
-cargo build --release -p containerd-shim-peridot
-sudo cp target/release/containerd-shim-peridot-v1 /usr/local/bin/
-```
-
-containerd locates a shim by its binary name, so the file must keep the name
-`containerd-shim-peridot-v1` and sit on containerd's `PATH`. That name maps to the runtime handler
-`io.containerd.peridot.v1`.
-
-### 2. Build the image
-
-The shim runs OCI images only; a plain file path is not supported. Images follow the
-[Wasm OCI artifact layout](https://tag-runtime.cncf.io/wgs/wasm/deliverables/wasm-oci-artifact/)
-and carry two layers, told apart by media type:
-
-| Layer | Media type |
-|---|---|
-| The Wasm module | `application/vnd.bytecodealliance.wasm.component.layer.v0+wasm` |
-| The Peridot configuration | `application/vnd.peridot.image.layer.v1+json` |
-
-The configuration layer holds the same YAML documented under [Configuration](#configuration),
-despite the `+json` suffix on its media type. The shim writes it to `/peridot_conf.yaml` inside
-the sandbox and reads it back from there.
-
-Build the artifact with `oci-tar-builder`:
-
-```bash
-cargo install oci-tar-builder
-
-oci-tar-builder --name wasi-helloworld \
-                --repo localhost:5000 \
-                --tag latest --module wasi-helloworld.wasm \
-                --layer application/vnd.peridot.image.layer.v1+json=peridot-config.yaml \
-                -o wasi-helloworld-oci.tar
-```
-
-Then import it into a registry. A local one is enough:
-
-```bash
-docker run -d -p 5000:5000 --name registry registry:2.7
-regctl image import localhost:5000/wasi-helloworld:latest wasi-helloworld-oci.tar
-```
-
-### 3. Run it
-
-```bash
-sudo ctr run --rm --net-host --runtime=io.containerd.peridot.v1 \
-    localhost:5000/wasi-helloworld:latest wasi-helloworld /wasi-helloworld.wasm
-```
-
-The final argument is the path of the module inside the image, so it follows the name given to
-`--module`. The chain comes from the configuration layer, so the same `contexts:` list works
-unchanged.
-
-### Differences from the CLI
-
-| | `peridot` CLI | containerd shim |
-|---|---|---|
-| Preopened directory | The module's own directory, as `.` | The host root, as `/` |
-| Module source | A path on disk | An OCI image layer |
-| Compilation | On every run | Precompiled and cached by containerd |
-| `plugins:` | Paths on the host | Paths inside the container image |
-| Metrics thread | Started only when `overseer_address` is set | Always attempted, failure logged as a warning |
-
-Plugins work under the shim, but the shim runs inside the container, so a `plugins:` path is
-resolved against the image's filesystem and the library has to be shipped in the image. Build it
-against the shim rather than the CLI, since that is the binary it will be loaded into:
-
-```bash
-cargo build --release -p containerd-shim-peridot -p peridot-geds-ctx
-```
-
-Note also that the shim preopens the host root rather than a single directory, so a guest sees far
-more of the filesystem than it does under the CLI.
-
-Components are not supported, only modules.
-
----
-
-## Writing a context
-
-Implement `DelegatingWasiCtx` (from the `peridot` crate), overriding only the hostcalls you care
-about. The default bodies forward everything else to the next context in the chain. Then expose a
-`factory` function. To build it into the binary, register it in `build_registry` in `src/main.rs`
-(and in `crates/containerd-shim-peridot/src/engine.rs` for the shim); to ship it separately, use
-`export_peridot_plugin!` as above. See `crates/contexts/peridot-counter-ctx` for the reference
-implementation.
-
-Overrides receive `&mut GuestMemory<'_>`, a borrow of the guest's linear memory. Use the helpers in
-`peridot::memory` (`payload`, `read_path`) rather than `to_vec`: they return a `Cow` that borrows
-guest memory directly and only copies when the guest uses **shared** memory, where wiggle cannot
-hand out a borrow safely.
-
-Note that borrowing only pays off if the context consumes the bytes before the hostcall returns. A
-context that defers work, such as a spawned upload or a buffer flushed later, must call
-`into_owned()`, and that copy is unavoidable.
-
-A context with in-flight background work should override `shutdown`, which runs after the guest's
-`_start` returns, outermost link first. Flush there, then forward to the next link.
-
-A context needing real host paths (to open files itself) gets the runtime's preopened directories
-via `ContextConfig::preopens` and `ContextConfig::resolve`, since the descriptor-to-directory
-mapping inside `WasiP1Ctx` is private to wasmtime.
+`containerd-shim-peridot` runs a Wasm workload as an ordinary container under
+`ctr`, `nerdctl` or Kubernetes. It cannot run inside this image: it needs a
+privileged Linux host with containerd and a registry.
+`crates/containerd-shim-peridot/README.md` has the walkthrough.
 
 ---
 
 ## Acknowledgements
 
-<img src="https://user-images.githubusercontent.com/45240979/228180946-606cb75e-46c9-429c-a62b-ea9098c375a0.svg" height="65">
+![European Union](docs/img/funding.svg)
 
 This work was partially conducted during Pablo Gimeno Sarroca's internship at IBM Research Zürich
 as part of the CLOUDSTARS EU mobility project (101086248). Supported by the European Union through

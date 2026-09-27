@@ -1,0 +1,9 @@
+# Pinned so a figure regenerated in 2030 looks like the one regenerated today.
+matplotlib==3.9.2
+pandas==2.2.3
+numpy==2.1.3
+
+# Used by the storage experiments to reset the bucket and to detect when
+# an arm has finished uploading. Not a plotting dependency, but it keeps the
+# image to a single pinned requirements file.
+boto3==1.35.76

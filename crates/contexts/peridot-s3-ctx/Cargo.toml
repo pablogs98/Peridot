@@ -3,6 +3,7 @@ name = "peridot-s3-ctx"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 wiggle = { workspace = true }
@@ -13,3 +14,4 @@ peridot = { workspace = true}
 aws-sdk-s3 = {workspace = true}
 aws-config = { workspace = true, features = ["behavior-version-latest"] }
 wasmtime-wasi = {workspace = true}
+serde = { version = "1.0.217", features = ["derive"] }

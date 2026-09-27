@@ -1,10 +1,4 @@
-use std::{
-    collections::HashSet,
-    fs,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{collections::HashSet, fs, sync::Arc, time::Duration};
 
 use arrow::{
     array::{ArrayRef, BinaryArray},
@@ -13,7 +7,7 @@ use arrow::{
 };
 use aws_sdk_s3::{Client};
 use parquet::{arrow::ArrowWriter, file::properties::WriterProperties};
-use rand::random;
+use uuid::Uuid;
 use tokio::{runtime::Runtime, task::JoinHandle, time::sleep};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -70,11 +64,16 @@ impl Batcher {
 
         if self.pending_batches.len() >= self.batch_size {
             let files_to_upload = self.pending_batches.drain(..).collect::<Vec<_>>();
-            let key = format!("batch_{}", random::<u16>());
+            // A u16 drawn at random collides often enough to matter: at 128
+            // batches the chance of at least one collision is about 12%, and a
+            // collision silently overwrites an already-uploaded batch. Same
+            // scheme as peridot-batch-ctx, so both arms of the comparison name
+            // their objects the same way.
+            let key = format!("batch_{}.parquet", Uuid::new_v4());
 
             let compressed = create_parquet_from_binary_chunks(&files_to_upload);
 
-            let local_file_path = format!("{}.parquet", key);
+            let local_file_path = key.clone();
             std::fs::write(&local_file_path, &compressed)
                 .expect("Failed to write local parquet file");
 
@@ -91,7 +90,7 @@ impl Batcher {
                 let _ = client
                     .put_object()
                     .bucket(bucket)
-                    .key(format!("{}.parquet", key))
+                    .key(key)
                     .body(aws_sdk_s3::primitives::ByteStream::from(compressed_clone))
                     .send()
                     .await;
@@ -156,7 +155,22 @@ async fn main() {
 
     let shared_rt = Arc::new(Runtime::new().unwrap());
     let config = aws_config::load_from_env().await;
-    let s3_client = Client::new(&config);
+    // See the note in peridot-s3-ctx: the SDK addresses buckets
+    // virtual-hosted-style by default, which a self-hosted S3-compatible store
+    // reached by hostname cannot serve. Off by default, so Amazon S3 is
+    // unaffected.
+    let force_path_style = std::env::var("AWS_S3_FORCE_PATH_STYLE")
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    let s3_client = if force_path_style {
+        Client::from_conf(
+            aws_sdk_s3::config::Builder::from(&config)
+                .force_path_style(true)
+                .build(),
+        )
+    } else {
+        Client::new(&config)
+    };
 
     let mut batcher = Batcher::new(args.batch_size, s3_client, args.bucket.clone(), shared_rt);
 
