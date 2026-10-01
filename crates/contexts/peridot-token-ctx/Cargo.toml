@@ -1,0 +1,16 @@
+[package]
+name = "peridot-token-ctx"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+peridot = { workspace = true}
+wiggle = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+wasmtime = { workspace = true }
+log = { workspace = true }
+wasmtime-wasi = {workspace = true}
+serde = { version = "1.0.217", features = ["derive"] }

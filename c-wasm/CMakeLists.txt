@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.29)
+project(wasm)
+set(CMAKE_C_STANDARD 23)
+add_subdirectory(helloworld)
+add_subdirectory(hostcall_latency)
+add_subdirectory(io_writer)
+add_subdirectory(iops)

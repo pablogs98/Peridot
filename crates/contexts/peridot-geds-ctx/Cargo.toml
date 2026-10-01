@@ -1,0 +1,26 @@
+[package]
+name = "peridot-geds-ctx"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Built as a dynamic library and loaded at run time, so a runtime without IBM GEDS installed
+# neither builds nor links it. Build this package explicitly on a machine that has GEDS:
+#   cargo build -p peridot-geds-ctx --release
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+peridot = { workspace = true }
+wiggle = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+wasmtime = { workspace = true }
+wasmtime-wasi = { workspace = true }
+log = { workspace = true }
+aes-gcm = "0.11.0-rc.2"
+rand_core = "0.6"
+rand = "0.8.5"
+hex = "0.4.3"
+# geds_rs = { path = "/usr/local/rust" }

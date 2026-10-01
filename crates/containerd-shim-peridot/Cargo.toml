@@ -1,0 +1,36 @@
+[package]
+name = "containerd-shim-peridot"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[patch.crates-io]
+oci-spec = "0.8.3"
+
+[dependencies.containerd-shim-wasm]
+# Pinned by revision, not by branch. An artifact has to keep building years after
+# publication, and a bare `git =` follows the fork's default branch wherever it moves.
+# This rev is the one Cargo.lock already resolves to.
+git = "https://github.com/miqalvarez/runwasi"
+rev = "8df45f8bb3c0cd485981e2d60b7c8301682fff3f"
+
+[dependencies]
+wasmtime = { workspace = true }
+wasmtime-wasi = { workspace = true }
+log = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+peridot = { workspace = true }
+peridot-token-ctx = {path = "../contexts/peridot-token-ctx"}
+peridot-counter-ctx = {path = "../contexts/peridot-counter-ctx"}
+peridot-s3-ctx = {path = "../contexts/peridot-s3-ctx"}
+peridot-batch-ctx = {path = "../contexts/peridot-batch-ctx"}
+peridot-syscall-batching-ctx = {path = "../contexts/peridot-syscall-batching-ctx"}
+oci-spec = "0.8.3"
+env_logger = "0.11.8"
+
+
+[[bin]]
+name = "containerd-shim-peridot-v1"
+path = "src/main.rs"

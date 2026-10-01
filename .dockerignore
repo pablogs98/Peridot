@@ -1,0 +1,19 @@
+# Keep the build context small and free of machine-specific junk. Everything
+# the image needs is source, the lockfile, and artifact/.
+target/
+**/target/
+.git/
+.idea/
+**/.DS_Store
+/plots/
+c-wasm/cmake-build*/
+c-wasm/**/CMakeFiles/
+c-wasm/**/cmake-build*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+artifact/results/
+# ...but the shipped reference CSVs do belong in the image.
+!artifact/results/reference/
+artifact/figures/

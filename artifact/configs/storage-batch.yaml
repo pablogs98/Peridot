@@ -1,0 +1,20 @@
+# Figure 7, Peridot arm.
+#
+# The `batch` context accumulates the files the guest writes and uploads each
+# group as one Parquet object. The guest still just opens, writes and closes
+# ordinary local files; it is never told any of this is happening.
+args: ["imagenet-preprocessing", "false", "256", "./tensors/tensors"]
+
+contexts:
+  - name: batch
+    config:
+      batch_size: 32
+      bucket: "peridot-ae"
+
+io:
+  demand: 150.0
+  max_bandwidth: 300.0
+
+cpu:
+  demand: 75.0
+  utilization: 0.85

@@ -1,0 +1,7 @@
+setup,rep,images,seconds,throughput_mbs
+s3-sync-ctx,1,256,3.303,46.67
+s3-sync-ctx,2,256,3.076,50.11
+s3-sync-ctx,3,256,3.021,51.02
+s3-async-ctx,1,256,1.431,107.72
+s3-async-ctx,2,256,1.440,107.04
+s3-async-ctx,3,256,1.431,107.72

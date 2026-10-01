@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package overseer;
+
+service Overseer {
+  rpc RegisterModule (RegisterModuleRequest) returns (ModuleResponse);
+  rpc RemoveModule (RemoveModuleRequest) returns (ModuleResponse);
+  rpc UpdateMetrics(UpdateMetricsRequest) returns (UpdateMetricsResponse);
+}
+
+message RegisterModuleRequest {
+  string module_id = 1;
+  double demand = 2;
+}
+
+message RemoveModuleRequest {
+  string module_id = 1;
+}
+
+message UpdateMetricsRequest {
+  string module_id = 1;
+  map<string, double> metrics = 2;
+}
+
+message UpdateMetricsResponse {
+  map<string, double> metrics = 1;
+}
+
+message ModuleResponse {
+
+}

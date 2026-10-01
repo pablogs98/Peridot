@@ -1,0 +1,77 @@
+# Tier 1: the full experiment environment.
+#
+#     docker compose -f artifact/docker-compose.yml up -d
+#     docker compose -f artifact/docker-compose.yml run --rm peridot experiments/run_all.sh
+#
+# Brings up an S3-compatible object store (MinIO) with the bucket already
+# created, and a Peridot container wired to it. The Overseer is not a service
+# here: the I/O experiment starts and stops its own, because the point of that
+# experiment is watching allocations change as modules come and go.
+
+name: peridot-ae
+
+services:
+  # Stands in for Amazon S3. The paper used the real thing; see the README
+  # under "What this artifact does and does not reproduce" for what that
+  # changes. Point S3_ENDPOINT at a real endpoint to test those claims.
+  minio:
+    # Chainguard's MinIO, pinned by digest. Neither docker.io/minio/minio nor
+    # quay.io/minio/minio can be pulled without authentication any more, and
+    # quay stopped serving the repository entirely; a reviewer should not have
+    # to arrange credentials to start an object store.
+    #
+    # Chainguard's free tier publishes only :latest and drops older digests
+    # over time, so this pin will eventually stop resolving too. Any
+    # S3-compatible endpoint works instead: set S3_ENDPOINT and the AWS_*
+    # variables, as artifact/env.example shows, and skip this service.
+    image: cgr.dev/chainguard/minio@sha256:6a1d0b45c8669726bba580ced0bfa4cb9fdeed1ed636dfabd81d1577beb6937b
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-peridot}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-peridot123}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console, handy for checking objects landed
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    volumes:
+      - minio-data:/data
+
+  peridot:
+    build:
+      context: ..
+      dockerfile: artifact/Dockerfile
+    # A fixed tag, not `latest`, so a rebuild cannot silently change what
+    # `docker compose run` picks up.
+    image: peridot-ae:middleware26
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      AWS_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-peridot-ae}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-peridot}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-peridot123}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      # MinIO is reached by hostname, and the AWS SDK would otherwise
+      # address the bucket virtual-hosted-style as <bucket>.minio:9000,
+      # which does not resolve. Leave unset against Amazon S3.
+      AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-true}
+      # Set to 1 for the paper-scale configuration. Read the README first:
+      # it needs the hardware from the paper's setup and runs for hours.
+      PERIDOT_AE_FULL: ${PERIDOT_AE_FULL:-0}
+    volumes:
+      # CSVs and figures land on the host, so they survive the container.
+      - ./results:/artifact/results
+      - ./figures:/artifact/figures
+    working_dir: /artifact
+    # Keep it alive for `docker compose exec`; `run --rm` ignores this.
+    command: ["sleep", "infinity"]
+
+volumes:
+  minio-data:

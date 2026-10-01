@@ -1,0 +1,19 @@
+# Figure 4 (interposition overhead), Peridot arm.
+#
+# `num_writes: 1` disables batching, so this measures the cost of interposition
+# alone: the hostcall goes through the context and straight on to the real WASI
+# implementation. That is the comparison the paper makes.
+args: ["hostcall_latency", "1024", "20000"]
+
+contexts:
+  - name: syscall-batching
+    config:
+      num_writes: 1
+
+io:
+  demand: 150.0
+  max_bandwidth: 300.0
+
+cpu:
+  demand: 75.0
+  utilization: 0.85

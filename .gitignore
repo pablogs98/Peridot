@@ -1,0 +1,36 @@
+# Rust
+/target
+target
+/crates/peridot/target/
+
+# The root Cargo.lock is deliberately tracked: a plugin and the runtime that loads it must
+# resolve against one identical lockfile, so it is part of the plugin contract, not just
+# hygiene. Per-member lockfiles are not — they only appear when a crate is built outside the
+# workspace, which is exactly what the plugin ABI forbids.
+crates/**/Cargo.lock
+
+# CMake output from the c-wasm guest modules. CMakeLists.txt files are tracked; everything
+# CMake generates from them is not.
+cmake-build*
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Editors and OS
+.idea/
+.DS_Store
+
+artifact/results/*.csv
+artifact/results/*.log
+artifact/figures/
+
+# tensor_batcher intermediates, in case one escapes its scratch directory.
+*.parquet
+__pycache__/
+
+# Guest build output. The .wasm modules the artifact ships are in
+# artifact/guests/ and are produced by artifact/bin/build-guests.sh.
+c-wasm/*.wasm
+c-wasm/**/*.wasm
+c-wasm/write_1g/write

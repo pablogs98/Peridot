@@ -1,0 +1,13 @@
+overseer_address: "http://127.0.0.1:50051"
+
+args:
+    - false
+    - 5000
+
+io:
+    demand: 1000
+    max_bandwidth: 1000
+
+cpu:
+    demand: 0.60
+    utilization: 0.85

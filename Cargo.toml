@@ -1,0 +1,98 @@
+[package]
+name = "peridot-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository = "https://github.com/pablogs98/Peridot"
+
+[workspace]
+members = [
+    "crates/containerd-shim-peridot",
+    "crates/contexts/imagenet-preprocessing",
+    "crates/peridot",
+    "crates/contexts/peridot-geds-ctx",
+    "crates/peridot-overseer",
+    "crates/peridot-overseer-grpc",
+    "crates/contexts/peridot-s3-ctx",
+    "crates/contexts/peridot-batch-ctx",
+    "crates/contexts/peridot-syscall-batching-ctx",
+    "crates/contexts/peridot-token-ctx",
+    "crates/contexts/peridot-counter-ctx",
+    "crates/contexts/tensor_batcher",
+    "crates/plugins/peridot-trace-plugin",
+]
+
+# What a bare `cargo build` builds. Two members are left out because they cannot be built
+# everywhere, and both stay full members so that `cargo build -p <name>` still resolves them
+# against this workspace's single Cargo.lock — which is what the plugin ABI requires:
+#
+#   peridot-geds-ctx        needs a native IBM GEDS installation; its `geds_rs` dependency ships
+#                           commented out, so it does not compile without one.
+#   containerd-shim-peridot pulls `procfs` via libcgroups/libcontainer, which is Linux-only.
+#
+# Build either explicitly, e.g. `cargo build --release -p peridot-cli -p peridot-geds-ctx`.
+default-members = [
+    ".",
+    "crates/peridot",
+    "crates/peridot-overseer",
+    "crates/peridot-overseer-grpc",
+    "crates/contexts/imagenet-preprocessing",
+    "crates/contexts/peridot-s3-ctx",
+    "crates/contexts/peridot-batch-ctx",
+    "crates/contexts/peridot-syscall-batching-ctx",
+    "crates/contexts/peridot-token-ctx",
+    "crates/contexts/peridot-counter-ctx",
+    "crates/contexts/tensor_batcher",
+    "crates/plugins/peridot-trace-plugin",
+]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Pablo Gimeno Sarroca", "Miquel Álvarez Ruiz"]
+edition = "2021"
+# See LICENSE, and THIRD-PARTY-NOTICES.md for material this does not cover.
+license = "Apache-2.0"
+
+[[bin]]
+name = "peridot"
+path = "src/main.rs"
+
+[workspace.dependencies]
+peridot = { path = "crates/peridot", version = "0.1.0" }
+peridot-overseer-grpc = { path = "crates/peridot-overseer-grpc" , version = "0.1.0" }
+
+clap = { version = "4.5.31", features = ["derive"] }
+log = "0.4.26"
+env_logger = "0.11.6"
+wasmtime = "38.0.3"
+wasmtime-wasi = "38.0.3"
+tokio = { version = "1", features = ["full"] }
+tonic = "0.12.3"
+aws-sdk-s3 = "1.79.0"
+aws-config = "1.1.7"
+
+# for context crates
+wiggle = "38.0.3"
+anyhow = "1.0.95"
+async-trait = "0.1.85"
+
+[dependencies]
+nix = { version = "0.29.0", features = ["process"] }
+peridot-token-ctx = { path = "crates/contexts/peridot-token-ctx" }
+peridot-s3-ctx = { path = "crates/contexts/peridot-s3-ctx" }
+peridot-counter-ctx = { path = "crates/contexts/peridot-counter-ctx" }
+peridot-batch-ctx = { path = "crates/contexts/peridot-batch-ctx" }
+peridot-syscall-batching-ctx = { path = "crates/contexts/peridot-syscall-batching-ctx" }
+wasmtime-wasi = { workspace = true }
+
+wasmtime = { workspace = true }
+clap = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+peridot = { workspace = true }
+tokio = { workspace = true }
+
+# No features. Contexts are selected at run time through the `contexts` list in the
+# configuration file, and anything not built into this binary — GEDS included — is loaded from a
+# plugin library named in `plugins`.

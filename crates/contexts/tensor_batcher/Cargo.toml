@@ -1,0 +1,22 @@
+[package]
+name = "tensor_batcher"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = "0.3"
+arrow = "50.0.0"
+parquet = "50.0.0"
+chrono = "=0.4.31"
+uuid = { version = "1.18.1", features = ["v4"] }
+futures = "0.3"
+
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "time"] }
+# behavior-version-latest, as in the other crates that build an S3 client:
+# it pins the SDK default-behaviour version and is what load_from_env expects.
+aws-config = { workspace = true, features = ["behavior-version-latest"] }
+aws-sdk-s3 = { workspace = true }
+clap = { workspace = true }

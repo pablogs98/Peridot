@@ -1,0 +1,21 @@
+# Figure 4 (interposition overhead), baseline arm.
+#
+# An empty `contexts` list is plain WASI with no interception at all, which is
+# exactly the "unmodified Wasmtime runtime" the paper compares against.
+# Running the baseline through the same binary keeps everything except
+# interposition identical between the two arms.
+#
+# experiments/exp_overhead.sh generates its own copies of this pair so it can
+# sweep iteration counts; these are here to read and to run by hand:
+#   peridot guests/hostcall_latency.wasm configs/overhead-baseline.yaml
+args: ["hostcall_latency", "1024", "20000"]
+
+contexts: []
+
+io:
+  demand: 150.0
+  max_bandwidth: 300.0
+
+cpu:
+  demand: 75.0
+  utilization: 0.85

@@ -1,0 +1,298 @@
+use log::{error, info};
+use std::collections::BTreeMap;
+use std::ops::{Deref, DerefMut};
+use std::time::Duration;
+use async_trait::async_trait;
+use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::operation::put_object::{PutObjectError, PutObjectOutput};
+use aws_sdk_s3::primitives::ByteStream;
+use tokio::task::JoinHandle;
+use tokio::time::Instant;
+use wasmtime_wasi::p1::types::{Error, CiovecArray, Fd, Fdflags, Lookupflags, Oflags, Rights, Size};
+use peridot::memory;
+use wiggle::{GuestMemory, GuestPtr};
+use peridot::context::DelegatingWasiCtx;
+use peridot::plugin::{BoxedContextFuture, ContextConfig};
+
+#[derive(Default)]
+struct S3Descriptors {
+    used: BTreeMap<u32, String>,
+    free: Vec<u32>,
+}
+
+impl Deref for S3Descriptors {
+    type Target = BTreeMap<u32, String>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.used
+    }
+}
+
+impl DerefMut for S3Descriptors {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.used
+    }
+}
+
+impl S3Descriptors {
+    fn new() -> S3Descriptors {
+        let descriptors = Self::default();
+        descriptors
+    }
+
+    /// Returns next descriptor number, which was never assigned
+    fn unused(&self) -> Result<u32, ()> {
+        match self.last_key_value() {
+            Some((fd, _)) => {
+                if let Some(fd) = fd.checked_add(1) {
+                    return Ok(fd);
+                }
+                if self.len() == u32::MAX as usize {
+                    return Err(());
+                }
+                Ok((8192..u32::MAX)
+                    .rev()
+                    .find(|fd| !self.contains_key(fd))
+                    .expect("failed to find an unused file descriptor"))
+            }
+            None => Ok(0),
+        }
+    }
+
+    fn remove(&mut self, fd: Fd) -> Option<String> {
+        let fd = fd.into();
+        let desc = self.used.remove(&fd)?;
+        self.free.push(fd);
+        Some(desc)
+    }
+
+    /// Pushes the [Descriptor] returning corresponding number.
+    /// This operation will try to reuse numbers previously removed via [`Self::remove`]
+    /// and rely on [`Self::unused`] if no free numbers are recorded
+    fn push(&mut self, desc: String) -> Result<u32, ()> {
+        let fd = if let Some(fd) = self.free.pop() {
+            fd
+        } else {
+            self.unused()?
+        };
+        assert!(self.insert(fd, desc).is_none());
+        Ok(fd)
+    }
+}
+
+pub struct PeridotS3Ctx {
+    next: Box<dyn DelegatingWasiCtx>,
+    s3: aws_sdk_s3::Client,
+    s3_descriptors: S3Descriptors,
+    futures: Vec<JoinHandle<(Result<PutObjectOutput, SdkError<PutObjectError>>, Duration, Instant)>>,
+    sync: bool,
+}
+
+/// Settings for the `s3` context.
+/// Builds an S3 client, honouring `AWS_S3_FORCE_PATH_STYLE`.
+///
+/// The AWS SDK addresses buckets virtual-hosted-style by default, turning an
+/// endpoint of `http://minio:9000` into `http://<bucket>.minio:9000`. Amazon
+/// S3 resolves that; a self-hosted S3-compatible store (MinIO, Ceph,
+/// SeaweedFS) addressed by hostname does not, and every request fails with a
+/// dispatch error. Setting `AWS_S3_FORCE_PATH_STYLE=true` keeps the bucket in
+/// the path instead. It is off by default, so behaviour against Amazon S3 is
+/// unchanged.
+async fn build_s3_client() -> aws_sdk_s3::Client {
+    let config = aws_config::load_from_env().await;
+    let force_path_style = std::env::var("AWS_S3_FORCE_PATH_STYLE")
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+
+    if force_path_style {
+        let builder = aws_sdk_s3::config::Builder::from(&config).force_path_style(true);
+        aws_sdk_s3::Client::from_conf(builder.build())
+    } else {
+        aws_sdk_s3::Client::new(&config)
+    }
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct S3Settings {
+    /// Await each upload inside `fd_write` instead of spawning it.
+    ///
+    /// The default (`false`) is the asynchronous context the paper calls
+    /// `s3-async-ctx`: the guest's write returns as soon as the bytes are
+    /// queued, so computation and I/O overlap. Setting this to `true` gives
+    /// the `s3-sync-ctx` arm, where the guest blocks until S3 acknowledges,
+    /// which is what makes the async/sync comparison in Table 1 possible.
+    pub sync: bool,
+}
+
+/// Registry entry point. Registered under the name `s3`.
+pub fn factory(next: Box<dyn DelegatingWasiCtx>, config: ContextConfig<'_>) -> BoxedContextFuture<'_> {
+    Box::pin(async move {
+        let settings: S3Settings = config.parse()?;
+        Ok(Box::new(PeridotS3Ctx::new(next, settings.sync).await) as Box<dyn DelegatingWasiCtx>)
+    })
+}
+
+impl PeridotS3Ctx {
+    pub async fn new(next: Box<dyn DelegatingWasiCtx>, sync: bool) -> Self {
+        let client = build_s3_client().await;
+        Self {
+            next,
+            s3: client,
+            s3_descriptors: S3Descriptors::new(),
+            futures: Vec::new(),
+            sync,
+        }
+    }
+
+    /// Uploads and awaits in place. Used only when `sync` is set; the return
+    /// value is discarded the same way the spawned path discards it, so the
+    /// two arms differ in when they block and in nothing else.
+    async fn put_s3_upload(&mut self, bucket: String, key: String, body: ByteStream) {
+        let start = Instant::now();
+        let result = self
+            .s3
+            .put_object()
+            .bucket(bucket)
+            .key(key)
+            .body(body)
+            .send()
+            .await;
+        if let Err(e) = result {
+            error!("synchronous S3 upload failed: {e}");
+        } else {
+            info!("Upload completed in {:.2?}", start.elapsed());
+        }
+    }
+
+    fn spawn_s3_upload(&mut self, bucket: String, key: String, body: ByteStream) {
+        let client = self.s3.clone();
+        let handle = tokio::spawn(async move {
+            let start = Instant::now();
+            let result = client.put_object()
+                .bucket(bucket)
+                .key(key)
+                .body(body)
+                .send()
+                .await;
+            let elapsed = start.elapsed();
+            (result, elapsed, start)
+        });
+        self.futures.push(handle);
+    }
+}
+
+#[async_trait]
+impl DelegatingWasiCtx for PeridotS3Ctx {
+    fn next(&mut self) -> Option<&mut dyn DelegatingWasiCtx> {
+        Some(&mut *self.next)
+    }
+
+    /// Uploads are spawned, not awaited, so they have to be joined before the process exits.
+    async fn shutdown(&mut self) {
+        self.drain_uploads().await;
+        self.next.shutdown().await;
+    }
+
+    async fn fd_close(&mut self, mem: &mut GuestMemory<'_>, fd: Fd) -> Result<(), Error> {
+        if self.s3_descriptors.contains_key(&u32::from(fd)) {
+            self.s3_descriptors.remove(fd);
+            return Ok(());
+        }
+        self.next.fd_close(mem, fd).await
+    }
+
+    async fn fd_write(
+        &mut self,
+        mem: &mut GuestMemory<'_>,
+        fd: Fd,
+        iovs: CiovecArray,
+    ) -> Result<Size, Error> {
+        if self.s3_descriptors.contains_key(&u32::from(fd)) {
+            let s3_file = self.s3_descriptors.get(&u32::from(fd)).unwrap();
+            // The upload is spawned, so the bytes outlive this call and must be owned.
+            let buf = memory::payload(mem, iovs)?.into_owned();
+            let len = buf.len();
+            let body = ByteStream::from(buf);
+            let bucket = s3_file.split("//").nth(1).unwrap().split("/").next().unwrap();
+            let key = s3_file.split("/").skip(3).collect::<Vec<&str>>().join("/");
+            if self.sync {
+                self.put_s3_upload(bucket.to_string(), key.to_string(), body).await;
+            } else {
+                self.spawn_s3_upload(bucket.to_string(), key.to_string(), body);
+            }
+            return Ok(u32::try_from(len)?);
+        }
+        self.next.fd_write(mem, fd, iovs).await
+    }
+
+    async fn path_open(&mut self, mem: &mut GuestMemory<'_>, fd: Fd, dirflags: Lookupflags, path: GuestPtr<str>, oflags: Oflags, fs_rights_base: Rights, fs_rights_inheriting: Rights, fdflags: Fdflags) -> Result<Fd, Error> {
+        let str_path = memory::read_path(mem, path)?;
+        if let Some(start) = str_path.find("s3://") {
+            let str_path = &str_path[start..];
+            let fd = self.s3_descriptors.push(str_path.to_string()).unwrap();
+            let fd = fd.into();
+            return Ok(fd);
+        }
+        self.next.path_open(mem, fd, dirflags, path, oflags, fs_rights_base, fs_rights_inheriting, fdflags).await
+    }
+}
+
+impl PeridotS3Ctx {
+    pub async fn drain_uploads(&mut self) {
+        if self.futures.is_empty() {
+            return;
+        }
+
+        info!("Waiting for {} pending S3 uploads...", self.futures.len());
+
+        let mut total_elapsed = Duration::ZERO;
+        let mut completed = 0;
+        let mut first_start: Option<Instant> = None;
+        let mut last_end: Option<Instant> = None;
+
+        for handle in self.futures.drain(..) {
+            match handle.await {
+                Ok((Ok(_), elapsed, start)) => {
+                    let end = start + elapsed;
+                    info!("Upload completed in {:.2?}", elapsed);
+
+                    // track earliest start
+                    if first_start.map_or(true, |fst| start < fst) {
+                        first_start = Some(start);
+                    }
+
+                    // track latest end
+                    if last_end.map_or(true, |led| end > led) {
+                        last_end = Some(end);
+                    }
+
+                    total_elapsed += elapsed;
+                    completed += 1;
+                }
+
+                Ok((Err(e), _, _)) => {
+                    error!("S3 upload failed: {:?}", e);
+                }
+
+                Err(join_err) => {
+                    error!("Task join error: {:?}", join_err);
+                }
+            }
+        }
+
+        // Summary statistics
+        if completed > 0 {
+            let avg = total_elapsed / completed as u32;
+            info!("Average S3 upload time: {:.2?}", avg);
+
+            if let (Some(start), Some(end)) = (first_start, last_end) {
+                let duration_sec = end.duration_since(start).as_secs_f64();
+                if duration_sec > 0.0 {
+                    let sps = completed as f64 / duration_sec;
+                    info!("Avg. uploads per second: {:.2}", sps);
+                }
+            }
+        }
+    }
+}
